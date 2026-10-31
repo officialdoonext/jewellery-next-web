@@ -22,22 +22,40 @@ export function AppSidebar() {
   const pathname = usePathname();
   const { sidebarOpen, toggleSidebar } = useSidebar();
   const [searchQuery, setSearchQuery] = useState('');
+  const navScrollRef = React.useRef<HTMLDivElement>(null);
   
-  // Track open state of each accordion group
-  const initialOpenState = useMemo(() => {
-    const state: Record<string, boolean> = {
-      sales: true,
-      inventory: true,
-    };
+  // Open ALL accordion groups by default as requested
+  const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>(() => {
+    const all: Record<string, boolean> = {};
     NAVIGATION_MODULES.forEach((mod) => {
-      if (pathname.includes(`/${mod.slug}/`)) {
-        state[mod.id] = true;
-      }
+      all[mod.id] = true;
     });
-    return state;
-  }, [pathname]);
+    return all;
+  });
 
-  const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>(initialOpenState);
+  // Keep track of scroll position and restore when navigating
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    try {
+      sessionStorage.setItem('sidebar_scroll_position', String(e.currentTarget.scrollTop));
+    } catch {}
+  };
+
+  React.useLayoutEffect(() => {
+    try {
+      const saved = sessionStorage.getItem('sidebar_scroll_position');
+      if (saved && navScrollRef.current) {
+        const scrollPos = parseInt(saved, 10);
+        if (!isNaN(scrollPos)) {
+          navScrollRef.current.scrollTop = scrollPos;
+          requestAnimationFrame(() => {
+            if (navScrollRef.current) {
+              navScrollRef.current.scrollTop = scrollPos;
+            }
+          });
+        }
+      }
+    } catch {}
+  }, [pathname]);
 
   const toggleAccordion = (id: string) => {
     setOpenAccordions((prev) => ({
@@ -117,6 +135,7 @@ export function AppSidebar() {
           {/* Action Button: New POS Bill */}
           <Link
             href="/sales/billing-pos"
+            scroll={false}
             className="flex items-center justify-center gap-1.5 w-full bg-white border border-dashed border-neutral-300 hover:border-emerald-500 hover:text-emerald-700 hover:bg-emerald-50/40 text-neutral-600 rounded-md py-1.5 font-medium transition-all shadow-2xs"
           >
             <Plus className="w-3.5 h-3.5 text-emerald-600" />
@@ -153,10 +172,15 @@ export function AppSidebar() {
         </div>
 
         {/* Scrollable Navigation List with Accordions */}
-        <div className="flex-1 overflow-y-auto px-2 py-1.5 space-y-1 divide-y-0 text-neutral-700 custom-scrollbar">
+        <div
+          ref={navScrollRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto px-2 py-1.5 space-y-1 divide-y-0 text-neutral-700 custom-scrollbar"
+        >
           {/* Direct Link: Dashboard */}
           <Link
             href="/"
+            scroll={false}
             className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs transition-all ${
               pathname === '/'
                 ? 'bg-emerald-50 text-emerald-700 font-medium border border-emerald-200/60 shadow-2xs'
@@ -212,6 +236,7 @@ export function AppSidebar() {
                         <Link
                           key={sub.id}
                           href={sub.href}
+                          scroll={false}
                           className={`group flex items-center justify-between px-2 py-1.5 rounded-sm transition-all text-[13px] ${
                             isActive
                               ? 'bg-emerald-50 text-emerald-800 font-medium border-l-2 border-emerald-500 shadow-2xs'

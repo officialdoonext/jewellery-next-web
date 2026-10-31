@@ -1,7 +1,6 @@
 import React, { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 import { NAVIGATION_MODULES, findSubmenuItem } from '@/lib/navigation';
-import { ClientLayout } from '@/components/ClientLayout';
 import { ComingSoonView } from '@/components/ComingSoonView';
 import { SettingsShopProfileView } from '@/components/settings/ShopProfileView';
 import { SettingsInvoiceTemplatesView } from '@/components/settings/InvoiceTemplatesView';
@@ -70,18 +69,16 @@ export default function SubmenuDetailPage({
   params: Promise<{ module: string; subpage: string }>;
 }) {
   return (
-    <ClientLayout>
-      <Suspense
-        fallback={
-          <div className="flex-1 flex flex-col h-full bg-[#fafafa] p-6 animate-pulse">
-            <div className="h-8 bg-neutral-200 rounded w-1/4 mb-4" />
-            <div className="h-4 bg-neutral-200 rounded w-1/2 mb-8" />
-            <div className="flex-1 bg-white border border-[#e5e7eb] rounded-lg" />
-          </div>
-        }
-      >
-        <SubmenuContent params={params} />
-      </Suspense>
-    </ClientLayout>
+    <Suspense
+      fallback={
+        <div className="flex-1 flex flex-col h-full bg-[#fafafa] p-6 animate-pulse">
+          <div className="h-8 bg-neutral-200 rounded w-1/4 mb-4" />
+          <div className="h-4 bg-neutral-200 rounded w-1/2 mb-8" />
+          <div className="flex-1 bg-white border border-[#e5e7eb] rounded-lg" />
+        </div>
+      }
+    >
+      <SubmenuContent params={params} />
+    </Suspense>
   );
 }

@@ -61,6 +61,7 @@ export function IconRail() {
         <div className="flex flex-col items-center gap-2 w-full">
           <Link
             href="/"
+            scroll={false}
             className="group relative flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-all shadow-sm"
             title="Jewellery Next - Home"
           >
@@ -88,6 +89,7 @@ export function IconRail() {
                 <Link
                   key={item.name}
                   href={item.href}
+                  scroll={false}
                   className={`relative group flex items-center justify-center w-9 h-9 rounded-md transition-all ${
                     active
                       ? 'bg-[#2a2a2a] text-emerald-400 shadow-sm'

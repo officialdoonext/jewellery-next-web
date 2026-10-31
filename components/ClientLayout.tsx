@@ -88,6 +88,7 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
                   <Link
                     key={i}
                     href={res.href}
+                    scroll={false}
                     onClick={() => setSearchModalOpen(false)}
                     className="flex items-center justify-between p-2.5 hover:bg-neutral-50 rounded-md group transition-colors"
                   >
@@ -117,6 +118,7 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
                   <div className="grid grid-cols-2 gap-1.5 font-medium">
                     <Link
                       href="/sales/billing-pos"
+                      scroll={false}
                       onClick={() => setSearchModalOpen(false)}
                       className="p-2 rounded hover:bg-neutral-50 text-neutral-800 flex items-center gap-2"
                     >
@@ -124,6 +126,7 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
                     </Link>
                     <Link
                       href="/inventory/ornaments"
+                      scroll={false}
                       onClick={() => setSearchModalOpen(false)}
                       className="p-2 rounded hover:bg-neutral-50 text-neutral-800 flex items-center gap-2"
                     >
@@ -131,6 +134,7 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
                     </Link>
                     <Link
                       href="/rates/gold-rates"
+                      scroll={false}
                       onClick={() => setSearchModalOpen(false)}
                       className="p-2 rounded hover:bg-neutral-50 text-neutral-800 flex items-center gap-2"
                     >
@@ -138,6 +142,7 @@ function LayoutShell({ children }: { children: React.ReactNode }) {
                     </Link>
                     <Link
                       href="/reports/sales"
+                      scroll={false}
                       onClick={() => setSearchModalOpen(false)}
                       className="p-2 rounded hover:bg-neutral-50 text-neutral-800 flex items-center gap-2"
                     >

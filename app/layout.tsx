@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Sora } from 'next/font/google';
 import './globals.css';
+import { ClientLayout } from '@/components/ClientLayout';
 
 const sora = Sora({
   subsets: ['latin'],
@@ -27,7 +28,7 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500&display=swap" rel="stylesheet" />
       </head>
       <body className={`${sora.className} h-full w-full overflow-hidden antialiased text-neutral-900 bg-white`}>
-        {children}
+        <ClientLayout>{children}</ClientLayout>
       </body>
     </html>
   );
