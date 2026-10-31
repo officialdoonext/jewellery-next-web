@@ -9,19 +9,9 @@ import {
   CheckCircle2,
   Share2,
   Printer,
-  ArrowRight,
-  Plus,
   X,
-  Copy,
-  Check,
-  Search,
   AlertCircle,
   BadgeIndianRupee,
-  Calendar,
-  Sparkles,
-  Layers,
-  Coins,
-  Percent,
 } from 'lucide-react';
 
 interface QuotationItem {
@@ -119,7 +109,6 @@ export function SalesQuotationsView() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedQuote, setSelectedQuote] = useState<QuotationItem | null>(null);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Form State
   const [custName, setCustName] = useState('');
@@ -146,7 +135,7 @@ export function SalesQuotationsView() {
     const expiry = new Date(now.getTime() + parseInt(validHours) * 60 * 60 * 1000);
 
     const newQ: QuotationItem = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `est-${Date.now()}`,
+      id: `est-${quotations.length + 1}-${custName.slice(0, 3)}`,
       quote_no: `EST-2026-0${420 + quotations.length}`,
       customer_name: custName,
       customer_phone: custPhone,
@@ -165,7 +154,6 @@ export function SalesQuotationsView() {
 
     setQuotations([newQ, ...quotations]);
     setIsAddModalOpen(false);
-    // Reset form
     setCustName('');
     setCustPhone('');
     setSummary('');
@@ -178,12 +166,6 @@ export function SalesQuotationsView() {
     );
     setQuotations(updated);
     alert(`Quotation ${quote.quote_no} has been converted into active POS billing bill!`);
-  };
-
-  const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
   };
 
   return (

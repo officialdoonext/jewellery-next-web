@@ -5,28 +5,15 @@ import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
 import {
   Receipt,
-  FileText,
   Printer,
   Share2,
-  QrCode,
   ShieldCheck,
-  CheckCircle2,
   Building2,
   Copy,
   Check,
-  Search,
-  Plus,
   X,
-  ExternalLink,
-  Download,
-  Eye,
-  Filter,
   BadgeIndianRupee,
-  Layers,
-  ArrowUpDown,
-  Send,
   Truck,
-  Hash,
 } from 'lucide-react';
 
 interface SalesInvoice {
@@ -148,7 +135,7 @@ const INITIAL_INVOICES: SalesInvoice[] = [
 ];
 
 export function SalesInvoicesView() {
-  const [invoices, setInvoices] = useState<SalesInvoice[]>(INITIAL_INVOICES);
+  const [invoices] = useState<SalesInvoice[]>(INITIAL_INVOICES);
   const [activeTab, setActiveTab] = useState<'data' | 'definition'>('data');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -246,7 +233,6 @@ export function SalesInvoicesView() {
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="text-neutral-400 font-mono text-[11px]">Filters:</span>
 
-              {/* Invoice Type */}
               <div className="flex items-center gap-1 bg-white border border-[#e2e8f0] rounded-md px-2 py-1">
                 <span className="text-[11px] text-neutral-500">Type:</span>
                 <select
@@ -260,7 +246,6 @@ export function SalesInvoicesView() {
                 </select>
               </div>
 
-              {/* Status */}
               <div className="flex items-center gap-1 bg-white border border-[#e2e8f0] rounded-md px-2 py-1">
                 <span className="text-[11px] text-neutral-500">Status:</span>
                 <select
@@ -291,7 +276,6 @@ export function SalesInvoicesView() {
         {/* Supabase-style Table */}
         <div className="p-4 sm:p-5 flex-1 flex flex-col">
           <div className="bg-white border border-[#e5e7eb] rounded-lg shadow-2xs overflow-hidden flex flex-col flex-1">
-            {/* Table Header Info Bar */}
             <div className="px-4 py-2.5 border-b border-[#e5e7eb] bg-[#f8fafc] flex items-center justify-between text-xs">
               <div className="flex items-center gap-2">
                 <Receipt className="w-4 h-4 text-emerald-600" />
@@ -304,7 +288,6 @@ export function SalesInvoicesView() {
                 </span>
               </div>
 
-              {/* Data / Definition toggle buttons */}
               <div className="flex items-center bg-neutral-200/60 p-0.5 rounded border border-neutral-300/60 text-[13px]">
                 <button
                   onClick={() => setActiveTab('data')}
@@ -329,7 +312,6 @@ export function SalesInvoicesView() {
               </div>
             </div>
 
-            {/* Table Content: Data Tab */}
             {activeTab === 'data' && (
               <div className="flex-1 overflow-x-auto custom-scrollbar w-full">
                 <table className="w-full text-left text-xs border-collapse">
@@ -342,51 +324,31 @@ export function SalesInvoicesView() {
                         />
                       </th>
                       <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">invoice_number</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">varchar</span>
-                        </div>
+                        <span className="text-neutral-800">invoice_number</span>
                       </th>
                       <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">date</span>
-                        </div>
+                        <span className="text-neutral-800">date</span>
                       </th>
                       <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">customer_name & gstin</span>
-                        </div>
+                        <span className="text-neutral-800">customer_name & gstin</span>
                       </th>
                       <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <span className="text-neutral-800">taxable_value</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">inr</span>
-                        </div>
+                        <span className="text-neutral-800">taxable_value</span>
                       </th>
                       <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <span className="text-neutral-800">cgst (1.5%)</span>
-                        </div>
+                        <span className="text-neutral-800">cgst (1.5%)</span>
                       </th>
                       <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <span className="text-neutral-800">sgst (1.5%)</span>
-                        </div>
+                        <span className="text-neutral-800">sgst (1.5%)</span>
                       </th>
                       <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <span className="text-neutral-800">total_invoice_val</span>
-                        </div>
+                        <span className="text-neutral-800">total_invoice_val</span>
                       </th>
                       <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">irn_hash</span>
-                        </div>
+                        <span className="text-neutral-800">irn_hash</span>
                       </th>
                       <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">status</span>
-                        </div>
+                        <span className="text-neutral-800">status</span>
                       </th>
                       <th className="px-3 py-2 font-medium whitespace-nowrap text-center">
                         Actions
@@ -512,7 +474,6 @@ export function SalesInvoicesView() {
               </div>
             )}
 
-            {/* Table Content: Definition Tab */}
             {activeTab === 'definition' && (
               <div className="p-4 overflow-x-auto font-mono text-xs text-neutral-800 bg-[#fbfbfb] w-full">
                 <div className="bg-neutral-900 text-neutral-100 p-4 rounded-md overflow-x-auto shadow-inner text-[12px] leading-relaxed w-full">

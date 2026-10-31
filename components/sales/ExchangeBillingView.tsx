@@ -5,23 +5,12 @@ import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
 import {
   Coins,
-  Scale,
-  Sparkles,
   Flame,
   BadgeIndianRupee,
-  CheckCircle2,
   Printer,
-  Plus,
   X,
-  Search,
-  AlertCircle,
-  Copy,
-  Check,
   Calculator,
   ShieldCheck,
-  ArrowRight,
-  Layers,
-  Radio,
 } from 'lucide-react';
 
 interface ExchangeBillRecord {
@@ -139,7 +128,7 @@ export function SalesExchangeBillingView() {
 
   const handleRecordExchange = () => {
     const newRecord: ExchangeBillRecord = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `exc-${Date.now()}`,
+      id: `exc-${exchanges.length + 1}-${customer.slice(0, 3)}`,
       exchange_id: `EXC-2026-0${52 + exchanges.length}`,
       customer_name: customer,
       customer_phone: phone,
@@ -338,13 +327,23 @@ export function SalesExchangeBillingView() {
                   <span className="text-[11px] text-neutral-500 block">Testing Method:</span>
                   <select
                     value={testMethod}
-                    onChange={(e) => setTestMethod(e.target.value as any)}
+                    onChange={(e) => setTestMethod(e.target.value as 'TOUCHSTONE_ACID' | 'XRF_SPECTROMETER' | 'DENSITY_SCALE')}
                     className="px-2 py-1 text-xs border border-[#e2e8f0] rounded-md bg-white focus:outline-none cursor-pointer"
                   >
                     <option value="XRF_SPECTROMETER">XRF Spectrometer (Precision 99.8%)</option>
                     <option value="TOUCHSTONE_ACID">Touchstone & Nitric Acid</option>
                     <option value="DENSITY_SCALE">Hydrostatic Specific Gravity Scale</option>
                   </select>
+                </div>
+
+                <div>
+                  <span className="text-[11px] text-neutral-500 block">Scrap Buy Rate (₹/g):</span>
+                  <input
+                    type="number"
+                    value={scrapRate}
+                    onChange={(e) => setScrapRate(e.target.value)}
+                    className="px-2 py-1 text-xs font-mono border border-[#e2e8f0] rounded-md bg-white w-24"
+                  />
                 </div>
 
                 <div>

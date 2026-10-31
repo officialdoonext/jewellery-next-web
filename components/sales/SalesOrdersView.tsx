@@ -7,21 +7,9 @@ import {
   Package,
   Calendar,
   Lock,
-  Clock,
-  Sparkles,
-  CheckCircle2,
-  Plus,
   X,
-  Search,
-  Filter,
   BadgeIndianRupee,
-  Layers,
-  ArrowRight,
-  ShieldCheck,
   Eye,
-  Camera,
-  Coins,
-  Scale,
 } from 'lucide-react';
 
 interface SalesOrder {
@@ -145,10 +133,10 @@ export function SalesOrdersView() {
     e.preventDefault();
     const wt = parseFloat(approxWeight) || 0;
     const adv = parseFloat(advance) || 0;
-    const estVal = Math.round(wt * 7850 * 1.15); // with making & GST
+    const estVal = Math.round(wt * 7850 * 1.15);
 
     const newOrder: SalesOrder = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `ord-${Date.now()}`,
+      id: `ord-${orders.length + 1}-${customerName.slice(0, 3)}`,
       order_no: `ORD-2026-0${316 + orders.length}`,
       customer_name: customerName,
       customer_phone: customerPhone,
@@ -169,7 +157,6 @@ export function SalesOrdersView() {
 
     setOrders([newOrder, ...orders]);
     setIsAddModalOpen(false);
-    // Reset
     setCustomerName('');
     setCustomerPhone('');
     setOccasion('');
@@ -592,7 +579,7 @@ export function SalesOrdersView() {
                   </label>
                   <select
                     value={ratePolicy}
-                    onChange={(e) => setRatePolicy(e.target.value as any)}
+                    onChange={(e) => setRatePolicy(e.target.value as 'FIXED_LOCKED_RATE' | 'FLOATING_DAY_RATE')}
                     className="w-full px-2.5 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none cursor-pointer"
                   >
                     <option value="FIXED_LOCKED_RATE">Rate Locked @ ₹7,850</option>

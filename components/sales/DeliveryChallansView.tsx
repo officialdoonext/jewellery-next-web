@@ -6,22 +6,9 @@ import { ActionToolbar } from '../ActionToolbar';
 import {
   Truck,
   Scale,
-  ShieldCheck,
   CheckCircle2,
-  Clock,
-  Plus,
   X,
-  Search,
-  Printer,
-  Eye,
-  AlertCircle,
-  Copy,
-  Check,
-  Package,
-  Layers,
-  ArrowRight,
   BadgeIndianRupee,
-  Barcode,
 } from 'lucide-react';
 
 interface DeliveryChallan {
@@ -87,7 +74,7 @@ const INITIAL_CHALLANS: DeliveryChallan[] = [
     dispatched_at: '2026-10-29 11:00 AM',
     return_due_date: '2026-10-30 14:00',
     approval_value: 485000.00,
-    status: 'PARTALLY_SOLD' as any,
+    status: 'PARTIALLY_SOLD',
     notes: '1 Solitaire Ring purchased on bill POS-2026-1039, 5 items returned',
   },
   {
@@ -122,7 +109,7 @@ export function SalesDeliveryChallansView() {
   const [custodian, setCustodian] = useState('M. Sridhar (Senior Sales Exec)');
   const [itemsCount, setItemsCount] = useState('4');
   const [totalWeight, setTotalWeight] = useState('48.500');
-  const [sealNo, setSealNo] = useState(`SLJ-SEAL-${Math.floor(8900 + Math.random() * 99)}`);
+  const [sealNo, setSealNo] = useState('SLJ-SEAL-8910');
   const [dueDate, setDueDate] = useState('2026-11-01 18:00');
   const [approvalVal, setApprovalVal] = useState('420000');
   const [notes, setNotes] = useState('');
@@ -130,7 +117,7 @@ export function SalesDeliveryChallansView() {
   const handleCreateChallan = (e: React.FormEvent) => {
     e.preventDefault();
     const newChallan: DeliveryChallan = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `dc-${Date.now()}`,
+      id: `dc-${challans.length + 1}-${recipient.slice(0, 3)}`,
       challan_no: `DC-2026-00${82 + challans.length}`,
       destination,
       recipient_name: recipient,
@@ -148,7 +135,6 @@ export function SalesDeliveryChallansView() {
 
     setChallans([newChallan, ...challans]);
     setIsAddModalOpen(false);
-    // Reset
     setRecipient('');
     setPhone('');
     setNotes('');
@@ -460,10 +446,10 @@ export function SalesDeliveryChallansView() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
                   <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Total Items Count
+                    Items Count
                   </label>
                   <input
                     type="number"
@@ -481,6 +467,17 @@ export function SalesDeliveryChallansView() {
                     step="0.001"
                     value={totalWeight}
                     onChange={(e) => setTotalWeight(e.target.value)}
+                    className="w-full px-3 py-1.5 text-xs font-mono border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
+                    Approval Value (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={approvalVal}
+                    onChange={(e) => setApprovalVal(e.target.value)}
                     className="w-full px-3 py-1.5 text-xs font-mono border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none"
                   />
                 </div>

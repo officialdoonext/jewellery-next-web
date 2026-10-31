@@ -9,21 +9,8 @@ import {
   Scale,
   BadgeIndianRupee,
   Flame,
-  Plus,
   X,
   Printer,
-  Share2,
-  Copy,
-  Check,
-  AlertCircle,
-  CheckCircle2,
-  ShieldCheck,
-  Search,
-  ArrowRight,
-  Wallet,
-  Coins,
-  RefreshCw,
-  Tag,
 } from 'lucide-react';
 
 interface SalesReturnRecord {
@@ -104,7 +91,6 @@ export function SalesReturnsView() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedReturn, setSelectedReturn] = useState<SalesReturnRecord | null>(null);
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Form State
   const [invLookup, setInvLookup] = useState('POS-2026-0982');
@@ -139,7 +125,7 @@ export function SalesReturnsView() {
     const netRefund = Math.max(0, retWt * 7850 - ded);
 
     const newRecord: SalesReturnRecord = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `ret-${Date.now()}`,
+      id: `ret-${returns.length + 1}-${Date.now().toString().slice(-4)}`,
       credit_note_no: `CRN-2026-${15 + returns.length}`,
       original_inv_no: invLookup,
       customer_name: customerName,
@@ -158,12 +144,6 @@ export function SalesReturnsView() {
 
     setReturns([newRecord, ...returns]);
     setIsAddModalOpen(false);
-  };
-
-  const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
   };
 
   return (
@@ -526,7 +506,7 @@ export function SalesReturnsView() {
                   </label>
                   <select
                     value={refundMode}
-                    onChange={(e) => setRefundMode(e.target.value as any)}
+                    onChange={(e) => setRefundMode(e.target.value as 'STORE_CREDIT_VOUCHER' | 'BANK_REFUND' | 'EXCHANGE_OFFSET')}
                     className="w-full px-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none cursor-pointer"
                   >
                     <option value="STORE_CREDIT_VOUCHER">Store Credit Note Voucher</option>
@@ -540,7 +520,7 @@ export function SalesReturnsView() {
                   </label>
                   <select
                     value={disposition}
-                    onChange={(e) => setDisposition(e.target.value as any)}
+                    onChange={(e) => setDisposition(e.target.value as 'RESTOCK_TO_VAULT' | 'SENT_TO_MELTING')}
                     className="w-full px-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none cursor-pointer"
                   >
                     <option value="RESTOCK_TO_VAULT">Restock into Vault (Re-tag)</option>
