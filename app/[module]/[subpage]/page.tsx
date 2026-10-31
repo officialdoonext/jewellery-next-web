@@ -63,6 +63,13 @@ import { BranchesStockView } from '@/components/branches/BranchStockView';
 import { BranchesRatesView } from '@/components/branches/BranchRatesView';
 import { BranchesConsolidatedReportsView } from '@/components/branches/ConsolidatedReportsView';
 
+import { OrdersCustomOrdersView } from '@/components/orders-services/CustomOrdersView';
+import { OrdersTrackingView } from '@/components/orders-services/OrderTrackingView';
+import { OrdersRepairsView } from '@/components/orders-services/RepairsView';
+import { OrdersJobWorkView } from '@/components/orders-services/JobWorkView';
+import { OrdersGoldsmithLedgerView } from '@/components/orders-services/GoldsmithLedgerView';
+import { OrdersDeliveryManagementView } from '@/components/orders-services/DeliveryManagementView';
+
 export async function generateStaticParams() {
   const params: { module: string; subpage: string }[] = [];
   NAVIGATION_MODULES.forEach((mod) => {
@@ -191,6 +198,19 @@ async function SubmenuContent({
       'consolidated-reports': <BranchesConsolidatedReportsView />,
     };
     const Comp = branchesMap[subpageSlug];
+    if (Comp) return <>{Comp}</>;
+  }
+
+  if (moduleSlug === 'orders-services') {
+    const ordersMap: Record<string, React.ReactNode> = {
+      'custom-orders': <OrdersCustomOrdersView />,
+      'tracking': <OrdersTrackingView />,
+      'repairs': <OrdersRepairsView />,
+      'job-work': <OrdersJobWorkView />,
+      'goldsmith-ledger': <OrdersGoldsmithLedgerView />,
+      'delivery-management': <OrdersDeliveryManagementView />,
+    };
+    const Comp = ordersMap[subpageSlug];
     if (Comp) return <>{Comp}</>;
   }
 
