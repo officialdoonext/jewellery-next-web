@@ -48,6 +48,15 @@ import { CustomersAdvanceDepositsView } from '@/components/customers/AdvanceDepo
 import { CustomersLoyaltyRewardsView } from '@/components/customers/LoyaltyRewardsView';
 import { CustomersSchemesView } from '@/components/customers/CustomerSchemesView';
 
+import { SalesBillingPosView } from '@/components/sales/BillingPosView';
+import { SalesInvoicesView } from '@/components/sales/SalesInvoicesView';
+import { SalesReturnsView } from '@/components/sales/SalesReturnsView';
+import { SalesQuotationsView } from '@/components/sales/QuotationsView';
+import { SalesOrdersView } from '@/components/sales/SalesOrdersView';
+import { SalesDeliveryChallansView } from '@/components/sales/DeliveryChallansView';
+import { SalesExchangeBillingView } from '@/components/sales/ExchangeBillingView';
+import { SalesHeldBillsView } from '@/components/sales/HeldBillsView';
+
 export async function generateStaticParams() {
   const params: { module: string; subpage: string }[] = [];
   NAVIGATION_MODULES.forEach((mod) => {
@@ -75,6 +84,21 @@ async function SubmenuContent({
   }
 
   const { module, item } = data;
+
+  if (moduleSlug === 'sales') {
+    const salesMap: Record<string, React.ReactNode> = {
+      'billing-pos': <SalesBillingPosView />,
+      'invoices': <SalesInvoicesView />,
+      'returns': <SalesReturnsView />,
+      'quotations': <SalesQuotationsView />,
+      'orders': <SalesOrdersView />,
+      'delivery-challans': <SalesDeliveryChallansView />,
+      'exchange-billing': <SalesExchangeBillingView />,
+      'held-bills': <SalesHeldBillsView />,
+    };
+    const Comp = salesMap[subpageSlug];
+    if (Comp) return <>{Comp}</>;
+  }
 
   if (moduleSlug === 'settings') {
     const settingsMap: Record<string, React.ReactNode> = {
