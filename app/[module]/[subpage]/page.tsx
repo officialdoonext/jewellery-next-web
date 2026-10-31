@@ -40,6 +40,14 @@ import { PurchasesPaymentsView } from '@/components/purchases/SupplierPaymentsVi
 import { PurchasesLedgerView } from '@/components/purchases/SupplierLedgerView';
 import { PurchasesJobWorkerReceiptsView } from '@/components/purchases/JobWorkerReceiptsView';
 
+import { CustomersListView } from '@/components/customers/CustomerListView';
+import { CustomersProfileView } from '@/components/customers/CustomerProfileView';
+import { CustomersPurchaseHistoryView } from '@/components/customers/PurchaseHistoryView';
+import { CustomersOutstandingBalancesView } from '@/components/customers/OutstandingBalancesView';
+import { CustomersAdvanceDepositsView } from '@/components/customers/AdvanceDepositsView';
+import { CustomersLoyaltyRewardsView } from '@/components/customers/LoyaltyRewardsView';
+import { CustomersSchemesView } from '@/components/customers/CustomerSchemesView';
+
 export async function generateStaticParams() {
   const params: { module: string; subpage: string }[] = [];
   NAVIGATION_MODULES.forEach((mod) => {
@@ -127,6 +135,20 @@ async function SubmenuContent({
       'job-worker-receipts': <PurchasesJobWorkerReceiptsView />,
     };
     const Comp = purchasesMap[subpageSlug];
+    if (Comp) return <>{Comp}</>;
+  }
+
+  if (moduleSlug === 'customers') {
+    const customersMap: Record<string, React.ReactNode> = {
+      'list': <CustomersListView />,
+      'profile': <CustomersProfileView />,
+      'purchase-history': <CustomersPurchaseHistoryView />,
+      'outstanding-balances': <CustomersOutstandingBalancesView />,
+      'advance-deposits': <CustomersAdvanceDepositsView />,
+      'loyalty-rewards': <CustomersLoyaltyRewardsView />,
+      'schemes': <CustomersSchemesView />,
+    };
+    const Comp = customersMap[subpageSlug];
     if (Comp) return <>{Comp}</>;
   }
 
