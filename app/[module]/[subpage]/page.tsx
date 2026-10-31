@@ -33,6 +33,13 @@ import { RatesDiamondValuationView } from '@/components/rates/DiamondValuationVi
 import { RatesMakingChargesView } from '@/components/rates/MakingChargesView';
 import { RatesWastageRulesView } from '@/components/rates/WastageRulesView';
 
+import { PurchasesEntryView } from '@/components/purchases/PurchaseEntryView';
+import { PurchasesReturnsView } from '@/components/purchases/PurchaseReturnsView';
+import { PurchasesSuppliersView } from '@/components/purchases/SuppliersDirectoryView';
+import { PurchasesPaymentsView } from '@/components/purchases/SupplierPaymentsView';
+import { PurchasesLedgerView } from '@/components/purchases/SupplierLedgerView';
+import { PurchasesJobWorkerReceiptsView } from '@/components/purchases/JobWorkerReceiptsView';
+
 export async function generateStaticParams() {
   const params: { module: string; subpage: string }[] = [];
   NAVIGATION_MODULES.forEach((mod) => {
@@ -107,6 +114,19 @@ async function SubmenuContent({
       'wastage-rules': <RatesWastageRulesView />,
     };
     const Comp = ratesMap[subpageSlug];
+    if (Comp) return <>{Comp}</>;
+  }
+
+  if (moduleSlug === 'purchases') {
+    const purchasesMap: Record<string, React.ReactNode> = {
+      'entry': <PurchasesEntryView />,
+      'returns': <PurchasesReturnsView />,
+      'suppliers': <PurchasesSuppliersView />,
+      'payments': <PurchasesPaymentsView />,
+      'ledger': <PurchasesLedgerView />,
+      'job-worker-receipts': <PurchasesJobWorkerReceiptsView />,
+    };
+    const Comp = purchasesMap[subpageSlug];
     if (Comp) return <>{Comp}</>;
   }
 
