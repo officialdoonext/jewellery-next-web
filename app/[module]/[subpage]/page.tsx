@@ -25,6 +25,14 @@ import { InventoryStockAdjustmentsView } from '@/components/inventory/StockAdjus
 import { InventoryStockAuditView } from '@/components/inventory/StockAuditView';
 import { InventoryReorderAlertsView } from '@/components/inventory/ReorderAlertsView';
 
+import { RatesGoldRatesView } from '@/components/rates/GoldRatesView';
+import { RatesSilverRatesView } from '@/components/rates/SilverRatesView';
+import { RatesRateHistoryView } from '@/components/rates/RateHistoryView';
+import { RatesOldGoldValuationView } from '@/components/rates/OldGoldValuationView';
+import { RatesDiamondValuationView } from '@/components/rates/DiamondValuationView';
+import { RatesMakingChargesView } from '@/components/rates/MakingChargesView';
+import { RatesWastageRulesView } from '@/components/rates/WastageRulesView';
+
 export async function generateStaticParams() {
   const params: { module: string; subpage: string }[] = [];
   NAVIGATION_MODULES.forEach((mod) => {
@@ -85,6 +93,20 @@ async function SubmenuContent({
       'reorder-alerts': <InventoryReorderAlertsView />,
     };
     const Comp = inventoryMap[subpageSlug];
+    if (Comp) return <>{Comp}</>;
+  }
+
+  if (moduleSlug === 'rates') {
+    const ratesMap: Record<string, React.ReactNode> = {
+      'gold-rates': <RatesGoldRatesView />,
+      'silver-rates': <RatesSilverRatesView />,
+      'rate-history': <RatesRateHistoryView />,
+      'old-gold-valuation': <RatesOldGoldValuationView />,
+      'diamond-valuation': <RatesDiamondValuationView />,
+      'making-charges': <RatesMakingChargesView />,
+      'wastage-rules': <RatesWastageRulesView />,
+    };
+    const Comp = ratesMap[subpageSlug];
     if (Comp) return <>{Comp}</>;
   }
 
