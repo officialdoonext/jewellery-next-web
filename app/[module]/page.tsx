@@ -23,4 +23,3 @@ export default async function ModuleRootPage({
   // Redirect to first submenu of this module
   redirect(mod.items[0].href);
 }
-
