@@ -14,6 +14,17 @@ import { SettingsBackupRestoreView } from '@/components/settings/BackupRestoreVi
 import { SettingsCloudSyncView } from '@/components/settings/CloudSyncView';
 import { SettingsSubscriptionView } from '@/components/settings/SubscriptionView';
 
+import { InventoryOrnamentsView } from '@/components/inventory/OrnamentsView';
+import { InventoryCategoriesView } from '@/components/inventory/CategoriesView';
+import { InventoryMetalTypesView } from '@/components/inventory/MetalTypesView';
+import { InventoryPurityKaratView } from '@/components/inventory/PurityKaratView';
+import { InventoryBarcodeTagsView } from '@/components/inventory/BarcodeTagsView';
+import { InventoryStockRegisterView } from '@/components/inventory/StockRegisterView';
+import { InventoryStockTransfersView } from '@/components/inventory/StockTransfersView';
+import { InventoryStockAdjustmentsView } from '@/components/inventory/StockAdjustmentsView';
+import { InventoryStockAuditView } from '@/components/inventory/StockAuditView';
+import { InventoryReorderAlertsView } from '@/components/inventory/ReorderAlertsView';
+
 export async function generateStaticParams() {
   const params: { module: string; subpage: string }[] = [];
   NAVIGATION_MODULES.forEach((mod) => {
@@ -58,6 +69,23 @@ async function SubmenuContent({
     };
     const SettingsComp = settingsMap[subpageSlug];
     if (SettingsComp) return <>{SettingsComp}</>;
+  }
+
+  if (moduleSlug === 'inventory') {
+    const inventoryMap: Record<string, React.ReactNode> = {
+      'ornaments': <InventoryOrnamentsView />,
+      'categories': <InventoryCategoriesView />,
+      'metal-types': <InventoryMetalTypesView />,
+      'purity-karat': <InventoryPurityKaratView />,
+      'barcode-tags': <InventoryBarcodeTagsView />,
+      'stock-register': <InventoryStockRegisterView />,
+      'stock-transfers': <InventoryStockTransfersView />,
+      'stock-adjustments': <InventoryStockAdjustmentsView />,
+      'stock-audit': <InventoryStockAuditView />,
+      'reorder-alerts': <InventoryReorderAlertsView />,
+    };
+    const Comp = inventoryMap[subpageSlug];
+    if (Comp) return <>{Comp}</>;
   }
 
   return <ComingSoonView module={module} item={item} />;
