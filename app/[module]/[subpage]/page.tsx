@@ -70,6 +70,17 @@ import { OrdersJobWorkView } from '@/components/orders-services/JobWorkView';
 import { OrdersGoldsmithLedgerView } from '@/components/orders-services/GoldsmithLedgerView';
 import { OrdersDeliveryManagementView } from '@/components/orders-services/DeliveryManagementView';
 
+import { FinanceCashBookView } from '@/components/finance/CashBookView';
+import { FinanceBankBookView } from '@/components/finance/BankBookView';
+import { FinanceUpiCardView } from '@/components/finance/UpiCardView';
+import { FinanceExpensesView } from '@/components/finance/ExpensesView';
+import { FinanceReceivablesView } from '@/components/finance/ReceivablesView';
+import { FinancePayablesView } from '@/components/finance/PayablesView';
+import { FinanceDayClosingView } from '@/components/finance/DayClosingView';
+import { FinanceJournalEntriesView } from '@/components/finance/JournalEntriesView';
+import { FinanceGstReportsView } from '@/components/finance/GstReportsView';
+import { FinanceProfitLossView } from '@/components/finance/ProfitLossView';
+
 export async function generateStaticParams() {
   const params: { module: string; subpage: string }[] = [];
   NAVIGATION_MODULES.forEach((mod) => {
@@ -211,6 +222,23 @@ async function SubmenuContent({
       'delivery-management': <OrdersDeliveryManagementView />,
     };
     const Comp = ordersMap[subpageSlug];
+    if (Comp) return <>{Comp}</>;
+  }
+
+  if (moduleSlug === 'finance') {
+    const financeMap: Record<string, React.ReactNode> = {
+      'cash-book': <FinanceCashBookView />,
+      'bank-book': <FinanceBankBookView />,
+      'upi-card': <FinanceUpiCardView />,
+      'expenses': <FinanceExpensesView />,
+      'receivables': <FinanceReceivablesView />,
+      'payables': <FinancePayablesView />,
+      'day-closing': <FinanceDayClosingView />,
+      'journal-entries': <FinanceJournalEntriesView />,
+      'gst-reports': <FinanceGstReportsView />,
+      'profit-loss': <FinanceProfitLossView />,
+    };
+    const Comp = financeMap[subpageSlug];
     if (Comp) return <>{Comp}</>;
   }
 
