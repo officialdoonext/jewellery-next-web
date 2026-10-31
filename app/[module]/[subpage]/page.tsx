@@ -57,6 +57,12 @@ import { SalesDeliveryChallansView } from '@/components/sales/DeliveryChallansVi
 import { SalesExchangeBillingView } from '@/components/sales/ExchangeBillingView';
 import { SalesHeldBillsView } from '@/components/sales/HeldBillsView';
 
+import { BranchesManagementView } from '@/components/branches/BranchManagementView';
+import { BranchesTransfersView } from '@/components/branches/InterBranchTransfersView';
+import { BranchesStockView } from '@/components/branches/BranchStockView';
+import { BranchesRatesView } from '@/components/branches/BranchRatesView';
+import { BranchesConsolidatedReportsView } from '@/components/branches/ConsolidatedReportsView';
+
 export async function generateStaticParams() {
   const params: { module: string; subpage: string }[] = [];
   NAVIGATION_MODULES.forEach((mod) => {
@@ -173,6 +179,18 @@ async function SubmenuContent({
       'schemes': <CustomersSchemesView />,
     };
     const Comp = customersMap[subpageSlug];
+    if (Comp) return <>{Comp}</>;
+  }
+
+  if (moduleSlug === 'branches') {
+    const branchesMap: Record<string, React.ReactNode> = {
+      'management': <BranchesManagementView />,
+      'transfers': <BranchesTransfersView />,
+      'stock': <BranchesStockView />,
+      'rates': <BranchesRatesView />,
+      'consolidated-reports': <BranchesConsolidatedReportsView />,
+    };
+    const Comp = branchesMap[subpageSlug];
     if (Comp) return <>{Comp}</>;
   }
 
