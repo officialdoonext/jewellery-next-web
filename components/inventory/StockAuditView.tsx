@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
 import {
@@ -8,19 +8,27 @@ import {
   ScanLine,
   CheckCircle2,
   AlertTriangle,
-  HelpCircle,
-  Play,
   RotateCw,
-  Copy,
-  Check,
-  ShieldCheck,
-  Sparkles,
+  Plus,
+  Trash2,
+  Loader2,
+  X,
   Search,
+  ShieldCheck,
+  AlertCircle,
   FileCheck2,
-  Tag,
 } from 'lucide-react';
+import { db } from '@/lib/firebase';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  deleteDoc,
+  doc,
+  updateDoc,
+} from 'firebase/firestore';
 
-interface AuditHistoryItem {
+export interface AuditHistoryItem {
   id: string;
   audit_session: string;
   section: string;
@@ -34,364 +42,358 @@ interface AuditHistoryItem {
   status: 'RECONCILED' | 'IN_PROGRESS' | 'DISCREPANCY';
 }
 
-const INITIAL_AUDITS: AuditHistoryItem[] = [
-  {
-    id: '34a89012-9988-4123-bc91-ae890123471b',
-    audit_session: 'AUD-2026-OCT',
-    section: 'Bridal Necklace Vault',
-    expected_pcs: 312,
-    scanned_pcs: 312,
-    match_percentage: 100.00,
-    missing_pcs: 0,
-    misplaced_pcs: 0,
-    auditor_name: 'P. Venkat (Internal Audit)',
-    audit_date: '2026-10-30',
-    status: 'RECONCILED',
-  },
-  {
-    id: '34a89012-9988-4123-bc91-ae890123471c',
-    audit_session: 'AUD-2026-SEP',
-    section: 'Display Counter 2 Bangles',
-    expected_pcs: 420,
-    scanned_pcs: 420,
-    match_percentage: 100.00,
-    missing_pcs: 0,
-    misplaced_pcs: 0,
-    auditor_name: 'K. Rajesh (Vault Head)',
-    audit_date: '2026-09-30',
-    status: 'RECONCILED',
-  },
-  {
-    id: '34a89012-9988-4123-bc91-ae890123471d',
-    audit_session: 'AUD-2026-AUG',
-    section: 'Safe Tray #14 (Solitaire Rings)',
-    expected_pcs: 180,
-    scanned_pcs: 179,
-    match_percentage: 99.44,
-    missing_pcs: 1,
-    misplaced_pcs: 0,
-    auditor_name: 'External Chartered Auditor',
-    audit_date: '2026-08-31',
-    status: 'DISCREPANCY',
-  },
-];
-
 export function InventoryStockAuditView() {
-  const [audits] = useState<AuditHistoryItem[]>(INITIAL_AUDITS);
-  const [activeTab, setActiveTab] = useState<'data' | 'definition'>('data');
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [audits, setAudits] = useState<AuditHistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatus, setFilterStatus] = useState('All');
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'idle'>('idle');
 
-  // Live Audit Session State
-  const [selectedSection, setSelectedSection] = useState('Bridal Necklace Vault');
-  const [isScanning, setIsScanning] = useState(false);
-  const [auditSubTab, setAuditSubTab] = useState<'found' | 'missing' | 'misplaced'>('found');
-  const [scannedProgress, setScannedProgress] = useState(312);
-  const expectedTotal = 312;
+  // Scanner Simulator State
+  const [activeAuditId, setActiveAuditId] = useState<string | null>(null);
+  const [scanInput, setScanInput] = useState('');
 
-  const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+  // Form State
+  const [sessionName, setSessionName] = useState('');
+  const [section, setSection] = useState('Bridal Necklace Vault');
+  const [expectedPcs, setExpectedPcs] = useState('');
+  const [auditorName, setAuditorName] = useState('Internal Audit Custodian');
+
+  const fetchAudits = async () => {
+    try {
+      setLoading(true);
+      const snapshot = await getDocs(collection(db, 'inventory_stock_audits'));
+      const list: AuditHistoryItem[] = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, ...(d.data() as Omit<AuditHistoryItem, 'id'>) });
+      });
+      list.sort((a, b) => (b.audit_date || '').localeCompare(a.audit_date || ''));
+      setAudits(list);
+    } catch (err: any) {
+      console.error('Error fetching stock audits:', err);
+      showToast('error', err.message || 'Failed to fetch audits');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleStartScan = () => {
-    setIsScanning(true);
-    setScannedProgress(0);
-    let current = 0;
-    const interval = setInterval(() => {
-      current += 52;
-      if (current >= expectedTotal) {
-        setScannedProgress(expectedTotal);
-        setIsScanning(false);
-        clearInterval(interval);
-      } else {
-        setScannedProgress(current);
-      }
-    }, 200);
+  useEffect(() => {
+    fetchAudits();
+  }, []);
+
+  const showToast = (type: 'success' | 'error', msg: string) => {
+    setToastType(type);
+    setToastMessage(msg);
+    setTimeout(() => setToastType('idle'), 4000);
   };
 
-  const matchPercent = ((scannedProgress / expectedTotal) * 100).toFixed(2);
+  const handleOpenAdd = () => {
+    const today = new Date();
+    const month = today.toLocaleString('default', { month: 'short' }).toUpperCase();
+    setSessionName(`AUD-${today.getFullYear()}-${month}`);
+    setExpectedPcs('');
+    setIsAddModalOpen(true);
+  };
+
+  const handleCreateAudit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!expectedPcs || !sessionName.trim()) return;
+
+    try {
+      setSaving(true);
+      const exp = parseInt(expectedPcs) || 1;
+      const today = new Date().toISOString().split('T')[0];
+
+      const newAudit = {
+        audit_session: sessionName.trim(),
+        section,
+        expected_pcs: exp,
+        scanned_pcs: 0,
+        match_percentage: 0.0,
+        missing_pcs: exp,
+        misplaced_pcs: 0,
+        auditor_name: auditorName.trim() || 'Internal Auditor',
+        audit_date: today,
+        status: 'IN_PROGRESS' as const,
+        created_at: new Date().toISOString(),
+      };
+
+      const docRef = await addDoc(collection(db, 'inventory_stock_audits'), newAudit);
+      setAudits((prev) => [{ id: docRef.id, ...newAudit }, ...prev]);
+      setIsAddModalOpen(false);
+      showToast('success', `Audit session ${newAudit.audit_session} started.`);
+    } catch (err: any) {
+      console.error('Error starting audit:', err);
+      showToast('error', err.message || 'Failed to start audit');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleQuickScan = async (audit: AuditHistoryItem) => {
+    const nextScanned = audit.scanned_pcs + 1;
+    const match = Math.min(100, Math.round((nextScanned / audit.expected_pcs) * 100));
+    const missing = Math.max(0, audit.expected_pcs - nextScanned);
+    const status = nextScanned >= audit.expected_pcs ? 'RECONCILED' : 'IN_PROGRESS';
+
+    try {
+      await updateDoc(doc(db, 'inventory_stock_audits', audit.id), {
+        scanned_pcs: nextScanned,
+        match_percentage: match,
+        missing_pcs: missing,
+        status,
+      });
+      setAudits((prev) =>
+        prev.map((a) =>
+          a.id === audit.id
+            ? { ...a, scanned_pcs: nextScanned, match_percentage: match, missing_pcs: missing, status }
+            : a
+        )
+      );
+      showToast('success', `Scanned item #${nextScanned} for ${audit.audit_session}`);
+    } catch (err: any) {
+      console.error('Error scanning:', err);
+    }
+  };
+
+  const handleDeleteAudit = async (id: string, name: string) => {
+    if (!confirm(`Delete audit session ${name}?`)) return;
+    try {
+      await deleteDoc(doc(db, 'inventory_stock_audits', id));
+      setAudits((prev) => prev.filter((a) => a.id !== id));
+      showToast('success', `Audit ${name} deleted.`);
+    } catch (err: any) {
+      console.error('Error deleting audit:', err);
+    }
+  };
+
+  const filteredAudits = audits.filter((a) => {
+    if (filterStatus !== 'All' && a.status !== filterStatus) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchSession = a.audit_session?.toLowerCase().includes(q);
+      const matchSec = a.section?.toLowerCase().includes(q);
+      const matchAuditor = a.auditor_name?.toLowerCase().includes(q);
+      if (!matchSession && !matchSec && !matchAuditor) return false;
+    }
+    return true;
+  });
+
+  const avgMatch = audits.length
+    ? (audits.reduce((acc, curr) => acc + (curr.match_percentage || 0), 0) / audits.length).toFixed(1)
+    : '0.0';
+  const reconciledCount = audits.filter((a) => a.status === 'RECONCILED').length;
+  const inProgressCount = audits.filter((a) => a.status === 'IN_PROGRESS').length;
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0">
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0 font-sans">
       <TabBar title="inventory_stock_audit" />
       <ActionToolbar
-        filterPlaceholder="Filter audit sessions by section, auditor, date..."
-        insertLabel="New Audit Session"
-        onInsertClick={handleStartScan}
+        filterPlaceholder="Filter audit sessions, sections..."
+        insertLabel="Start Audit"
+        onInsertClick={handleOpenAdd}
+        onRefresh={fetchAudits}
       />
 
       <div className="flex-1 overflow-y-auto bg-[#fafafa] flex flex-col custom-scrollbar w-full">
-        {/* Live Audit Session Control & Scanner Status */}
-        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white">
-          <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] shadow-2xs space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              {/* Left: Section selection & Scanner Hardware Status */}
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-1.5 bg-white border border-[#e2e8f0] rounded-md px-3 py-1.5">
-                  <span className="text-xs text-neutral-500 font-medium">Audit Section:</span>
-                  <select
-                    value={selectedSection}
-                    onChange={(e) => setSelectedSection(e.target.value)}
-                    className="bg-transparent text-xs text-neutral-800 font-medium focus:outline-none cursor-pointer"
-                  >
-                    <option value="Bridal Necklace Vault">Bridal Necklace Vault (312 pcs)</option>
-                    <option value="Display Counter 2 Bangles">Display Counter 2 Bangles (420 pcs)</option>
-                    <option value="Safe Tray #14">Safe Tray #14 (180 pcs)</option>
-                    <option value="Gold Chains Counter 1">Gold Chains Counter 1 (210 pcs)</option>
-                  </select>
-                </div>
+        <div className="p-4 flex flex-col gap-4 max-w-7xl w-full mx-auto">
+          {/* Toast */}
+          {toastType === 'success' && (
+            <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{toastMessage}</span>
+            </div>
+          )}
+          {toastType === 'error' && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <span>{toastMessage}</span>
+            </div>
+          )}
 
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-mono">
-                  <Radio className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
-                  <span>RFID Wand Connected (868 MHz UHF • 240 tags/sec)</span>
-                </div>
+          {/* Metric Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Average Match</span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
               </div>
-
-              {/* Right: Scan Action Button */}
-              <button
-                onClick={handleStartScan}
-                disabled={isScanning}
-                className="flex items-center gap-2 px-4 py-2 rounded-md text-xs font-medium bg-neutral-900 text-white hover:bg-neutral-800 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
-              >
-                {isScanning ? (
-                  <>
-                    <RotateCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-                    <span>Sweeping RFID Tray... ({scannedProgress}/{expectedTotal})</span>
-                  </>
-                ) : (
-                  <>
-                    <ScanLine className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Start Audit / Scan Tray</span>
-                  </>
-                )}
-              </button>
+              <div className="text-xl font-medium text-neutral-800">{avgMatch}%</div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">Physical count accuracy</div>
             </div>
 
-            {/* Audit Progress & Discrepancy KPI Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2 border-t border-[#f1f5f9]">
-              <div className="p-3 bg-white border border-[#e2e8f0] rounded-md">
-                <div className="text-[11px] uppercase tracking-wider text-neutral-500 font-medium">
-                  Expected Items
-                </div>
-                <div className="text-lg font-medium text-neutral-900 mt-0.5">{expectedTotal} pcs</div>
-                <div className="text-[10px] text-neutral-400 font-mono">Book inventory</div>
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Reconciled Vaults</span>
+                <FileCheck2 className="w-4 h-4 text-emerald-600" />
               </div>
-
-              <div className="p-3 bg-white border border-[#e2e8f0] rounded-md">
-                <div className="text-[11px] uppercase tracking-wider text-emerald-700 font-medium">
-                  Scanned Items
-                </div>
-                <div className="text-lg font-medium text-emerald-700 mt-0.5">{scannedProgress} pcs</div>
-                <div className="text-[10px] text-emerald-600 font-mono">RFID detected</div>
-              </div>
-
-              <div className="p-3 bg-white border border-[#e2e8f0] rounded-md">
-                <div className="text-[11px] uppercase tracking-wider text-blue-700 font-medium">
-                  Match Rate
-                </div>
-                <div className="text-lg font-medium text-blue-700 mt-0.5">{matchPercent}%</div>
-                <div className="text-[10px] text-blue-600 font-mono">Zero discrepancy</div>
-              </div>
-
-              <div className="p-3 bg-white border border-[#e2e8f0] rounded-md">
-                <div className="text-[11px] uppercase tracking-wider text-neutral-500 font-medium">
-                  Missing Items
-                </div>
-                <div className="text-lg font-medium text-neutral-900 mt-0.5">0 pcs</div>
-                <div className="text-[10px] text-emerald-600 font-mono">No loss detected</div>
-              </div>
-
-              <div className="p-3 bg-white border border-[#e2e8f0] rounded-md col-span-2 sm:col-span-1">
-                <div className="text-[11px] uppercase tracking-wider text-neutral-500 font-medium">
-                  Misplaced Items
-                </div>
-                <div className="text-lg font-medium text-neutral-900 mt-0.5">0 pcs</div>
-                <div className="text-[10px] text-emerald-600 font-mono">Correct tray slots</div>
-              </div>
+              <div className="text-xl font-medium text-neutral-800">{reconciledCount}</div>
+              <div className="text-[10px] text-emerald-600 font-medium mt-0.5">100% matched sessions</div>
             </div>
 
-            {/* Sub-tabs: Found / Missing / Misplaced */}
-            <div className="flex items-center gap-2 pt-1 text-xs">
-              <button
-                onClick={() => setAuditSubTab('found')}
-                className={`px-3 py-1 rounded-md font-medium border transition-colors cursor-pointer ${
-                  auditSubTab === 'found'
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                    : 'bg-white text-neutral-600 border-[#e2e8f0]'
-                }`}
-              >
-                Found Items ({scannedProgress})
-              </button>
-              <button
-                onClick={() => setAuditSubTab('missing')}
-                className={`px-3 py-1 rounded-md font-medium border transition-colors cursor-pointer ${
-                  auditSubTab === 'missing'
-                    ? 'bg-red-50 text-red-800 border-red-300'
-                    : 'bg-white text-neutral-600 border-[#e2e8f0]'
-                }`}
-              >
-                Missing Items (0)
-              </button>
-              <button
-                onClick={() => setAuditSubTab('misplaced')}
-                className={`px-3 py-1 rounded-md font-medium border transition-colors cursor-pointer ${
-                  auditSubTab === 'misplaced'
-                    ? 'bg-amber-50 text-amber-800 border-amber-300'
-                    : 'bg-white text-neutral-600 border-[#e2e8f0]'
-                }`}
-              >
-                Misplaced Items (0)
-              </button>
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">In-Progress Audits</span>
+                <Radio className="w-4 h-4 text-amber-500 animate-pulse" />
+              </div>
+              <div className="text-xl font-medium text-neutral-800">{inProgressCount}</div>
+              <div className="text-[10px] text-amber-600 font-medium mt-0.5">Barcode scanning active</div>
+            </div>
+
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Total Audits</span>
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-xl font-medium text-neutral-800">{audits.length}</div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">Completed cycle counts</div>
             </div>
           </div>
-        </div>
 
-        {/* Supabase-style Table / Schema Definition Section */}
-        <div className="p-4 sm:p-5 flex-1 flex flex-col">
-          <div className="bg-white border border-[#e5e7eb] rounded-lg shadow-2xs overflow-hidden flex flex-col flex-1">
-            {/* Table Header Info Bar */}
-            <div className="px-4 py-2.5 border-b border-[#e5e7eb] bg-[#f8fafc] flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <FileCheck2 className="w-4 h-4 text-emerald-600" />
-                <span className="font-mono font-medium text-neutral-800">
-                  physical_stock_audits
-                </span>
-                <span className="text-neutral-400">•</span>
-                <span className="text-neutral-500">
-                  RFID &amp; Barcode stock audit logs with sign-off
-                </span>
+          {/* Action & Filter Bar */}
+          <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search session or section..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 pr-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-[#f8fafc] focus:bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-medium placeholder:text-neutral-400 w-48 sm:w-60"
+                />
               </div>
 
-              {/* Data / Definition toggle buttons */}
-              <div className="flex items-center bg-neutral-200/60 p-0.5 rounded border border-neutral-300/60 text-[13px]">
-                <button
-                  onClick={() => setActiveTab('data')}
-                  className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
-                    activeTab === 'data'
-                      ? 'bg-white text-neutral-900 shadow-2xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  Data
-                </button>
-                <button
-                  onClick={() => setActiveTab('definition')}
-                  className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
-                    activeTab === 'definition'
-                      ? 'bg-white text-neutral-900 shadow-2xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  Definition
-                </button>
-              </div>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="px-2.5 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-700 font-medium cursor-pointer"
+              >
+                <option value="All">All Statuses</option>
+                <option value="RECONCILED">Reconciled</option>
+                <option value="IN_PROGRESS">In Progress</option>
+                <option value="DISCREPANCY">Discrepancy</option>
+              </select>
             </div>
 
-            {/* Table Content: Data Tab */}
-            {activeTab === 'data' && (
-              <div className="flex-1 overflow-x-auto custom-scrollbar w-full">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-[#fcfcfc] border-b border-[#e5e7eb] text-neutral-600 font-mono text-[12px]">
-                      <th className="w-10 px-3 py-2 border-r border-[#e5e7eb] text-center">
-                        <input
-                          type="checkbox"
-                          className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                        />
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">audit_session</span>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">section</span>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <span className="text-neutral-800">expected_pcs</span>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <span className="text-neutral-800">scanned_pcs</span>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <span className="text-neutral-800">match_%</span>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">auditor_name</span>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">audit_date</span>
-                      </th>
-                      <th className="px-3.5 py-2 font-medium whitespace-nowrap text-center">
-                        <span className="text-neutral-800">status</span>
-                      </th>
+            <button
+              onClick={handleOpenAdd}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#24b47e] hover:bg-[#1fa070] text-white shadow-2xs transition-colors cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>Start New Audit</span>
+            </button>
+          </div>
+
+          {/* Table Container */}
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-2xs overflow-hidden">
+            {loading ? (
+              <div className="p-12 flex flex-col items-center justify-center gap-2 text-neutral-500">
+                <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+                <span className="text-xs font-medium">Loading audit sessions from Firebase...</span>
+              </div>
+            ) : filteredAudits.length === 0 ? (
+              <div className="p-12 text-center">
+                <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center mx-auto mb-3 text-emerald-600">
+                  <ScanLine className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-medium text-neutral-800">No Audit Sessions</h3>
+                <p className="text-xs text-neutral-500 mt-1 max-w-sm mx-auto">
+                  {audits.length === 0
+                    ? 'No physical stock audit sessions logged in Firebase yet. Click "Start New Audit" to verify showroom or vault pieces against system records.'
+                    : 'No sessions match your active filters.'}
+                </p>
+                {audits.length === 0 && (
+                  <button
+                    onClick={handleOpenAdd}
+                    className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#24b47e] text-white hover:bg-[#1fa070] transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Launch First Audit
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-[#f8fafc] text-neutral-600 font-medium border-b border-[#e2e8f0]">
+                    <tr>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Session Name</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Section / Counter</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] text-right">Expected</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] text-right">Scanned</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] text-right">Match %</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] text-right">Missing</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Auditor</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Date</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Status</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#e5e7eb] font-mono text-neutral-800 text-[12px]">
-                    {audits.map((row) => (
-                      <tr key={row.id} className="hover:bg-neutral-50/80 transition-colors group">
-                        <td className="px-3 py-2 border-r border-[#e5e7eb] text-center">
-                          <input
-                            type="checkbox"
-                            className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                          />
+                  <tbody className="divide-y divide-[#e2e8f0]">
+                    {filteredAudits.map((a) => (
+                      <tr key={a.id} className="hover:bg-[#f8fafc] transition-colors">
+                        <td className="py-2.5 px-3 font-mono font-medium text-neutral-800">{a.audit_session}</td>
+                        <td className="py-2.5 px-3 font-medium text-neutral-700">{a.section}</td>
+
+                        <td className="py-2.5 px-3 text-right font-mono text-neutral-700">
+                          {a.expected_pcs} pcs
                         </td>
 
-                        {/* Session ID */}
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap font-medium text-neutral-900">
-                          <span className="px-1.5 py-0.5 rounded bg-neutral-100 border border-neutral-200 text-neutral-800 text-[11px]">
-                            {row.audit_session}
+                        <td className="py-2.5 px-3 text-right font-mono font-medium text-neutral-800">
+                          {a.scanned_pcs} pcs
+                        </td>
+
+                        <td className="py-2.5 px-3 text-right font-mono font-medium">
+                          <span className={a.match_percentage === 100 ? 'text-emerald-700' : 'text-amber-700'}>
+                            {a.match_percentage}%
                           </span>
                         </td>
 
-                        {/* Section */}
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap font-sans font-medium text-neutral-900">
-                          {row.section}
-                        </td>
-
-                        {/* Expected */}
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-right text-neutral-700">
-                          {row.expected_pcs}
-                        </td>
-
-                        {/* Scanned */}
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-right font-medium text-neutral-900">
-                          {row.scanned_pcs}
-                        </td>
-
-                        {/* Match % */}
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-right">
-                          <span
-                            className={
-                              row.match_percentage === 100
-                                ? 'text-emerald-700 font-medium'
-                                : 'text-amber-700 font-medium'
-                            }
-                          >
-                            {row.match_percentage.toFixed(2)}%
+                        <td className="py-2.5 px-3 text-right font-mono">
+                          <span className={a.missing_pcs > 0 ? 'text-amber-700 font-medium' : 'text-neutral-500'}>
+                            {a.missing_pcs}
                           </span>
                         </td>
 
-                        {/* Auditor */}
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap font-sans text-neutral-600 text-[11px]">
-                          {row.auditor_name}
-                        </td>
+                        <td className="py-2.5 px-3 text-neutral-600">{a.auditor_name}</td>
+                        <td className="py-2.5 px-3 text-neutral-500 text-[11px]">{a.audit_date}</td>
 
-                        {/* Date */}
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-500 text-[11px]">
-                          {row.audit_date}
-                        </td>
-
-                        {/* Status */}
-                        <td className="px-3.5 py-2 whitespace-nowrap text-center">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                              row.status === 'RECONCILED'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-red-50 text-red-700 border border-red-200'
-                            }`}
-                          >
-                            {row.status}
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${
+                            a.status === 'RECONCILED'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : a.status === 'IN_PROGRESS'
+                              ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : 'bg-red-50 text-red-700 border-red-200'
+                          }`}>
+                            {a.status.replace('_', ' ')}
                           </span>
+                        </td>
+
+                        <td className="py-2.5 px-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {a.status === 'IN_PROGRESS' && (
+                              <button
+                                onClick={() => handleQuickScan(a)}
+                                className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 flex items-center gap-1"
+                                title="Simulate Barcode Scan"
+                              >
+                                <ScanLine className="w-2.5 h-2.5" />
+                                +1 Scan
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteAudit(a.id, a.audit_session)}
+                              className="p-1 rounded text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                              title="Delete audit"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -399,72 +401,97 @@ export function InventoryStockAuditView() {
                 </table>
               </div>
             )}
-
-            {/* Table Content: Definition Tab */}
-            {activeTab === 'definition' && (
-              <div className="p-4 overflow-x-auto font-mono text-xs text-neutral-800 bg-[#fbfbfb] w-full">
-                <div className="bg-neutral-900 text-neutral-100 p-4 rounded-md overflow-x-auto shadow-inner text-[12px] leading-relaxed w-full">
-                  <span className="text-emerald-400">CREATE TABLE</span> public.physical_stock_audits (
-                  <br />
-                  <span className="pl-6 text-blue-300">id</span>{' '}
-                  <span className="text-amber-300">uuid</span>{' '}
-                  <span className="text-neutral-400">DEFAULT gen_random_uuid() PRIMARY KEY,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">audit_session</span>{' '}
-                  <span className="text-amber-300">varchar(32)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">section</span>{' '}
-                  <span className="text-amber-300">varchar(64)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">expected_pcs</span>{' '}
-                  <span className="text-amber-300">integer</span>{' '}
-                  <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">scanned_pcs</span>{' '}
-                  <span className="text-amber-300">integer</span>{' '}
-                  <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">match_percentage</span>{' '}
-                  <span className="text-amber-300">numeric(5,2)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">auditor_name</span>{' '}
-                  <span className="text-amber-300">varchar(100)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">audit_date</span>{' '}
-                  <span className="text-amber-300">date</span>{' '}
-                  <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">status</span>{' '}
-                  <span className="text-amber-300">varchar(20)</span>{' '}
-                  <span className="text-neutral-400">DEFAULT &apos;RECONCILED&apos;</span>
-                  <br />
-                  );
-                  <br />
-                  <br />
-                  <span className="text-emerald-400">ALTER TABLE</span> public.physical_stock_audits{' '}
-                  <span className="text-emerald-400">ENABLE ROW LEVEL SECURITY;</span>
-                </div>
-              </div>
-            )}
-
-            {/* Table Footer Bar */}
-            <div className="h-[36px] bg-[#f8fafc] border-t border-[#e5e7eb] px-3.5 flex items-center justify-between text-[12px] text-neutral-500 font-mono select-none w-full">
-              <div className="flex items-center gap-3">
-                <span>{audits.length} audit sessions recorded</span>
-                <span>•</span>
-                <span>RFID Wand certified to EPC Gen2 standards</span>
-              </div>
-              <div className="text-emerald-600 font-medium">
-                Audit Reconciliation Complete
-              </div>
-            </div>
           </div>
         </div>
       </div>
+
+      {/* Start Audit Session Modal */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-xl w-full max-w-md overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-[#e2e8f0]">
+              <div className="flex items-center gap-2">
+                <Radio className="w-4 h-4 text-emerald-600" />
+                <h2 className="text-sm font-medium text-neutral-800">Initiate Physical Stock Audit</h2>
+              </div>
+              <button
+                onClick={() => setIsAddModalOpen(false)}
+                className="text-neutral-400 hover:text-neutral-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateAudit} className="p-4 space-y-3 text-xs">
+              <div>
+                <label className="block text-neutral-700 font-medium mb-1">Session Code *</label>
+                <input
+                  type="text"
+                  required
+                  value={sessionName}
+                  onChange={(e) => setSessionName(e.target.value)}
+                  className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-neutral-700 font-medium mb-1">Showroom Section / Counter</label>
+                <select
+                  value={section}
+                  onChange={(e) => setSection(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-700 focus:border-emerald-500 focus:outline-none font-medium"
+                >
+                  <option value="Bridal Necklace Vault">Bridal Necklace Vault</option>
+                  <option value="Display Counter 2 Bangles">Display Counter 2 Bangles</option>
+                  <option value="Diamond Solitaire Ring Tray">Diamond Solitaire Ring Tray</option>
+                  <option value="Daily Chains Counter">Daily Chains Counter</option>
+                  <option value="Silver Utensils Showcase">Silver Utensils Showcase</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-neutral-700 font-medium mb-1">Expected Pieces Count *</label>
+                <input
+                  type="number"
+                  required
+                  placeholder="e.g. 150"
+                  value={expectedPcs}
+                  onChange={(e) => setExpectedPcs(e.target.value)}
+                  className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-neutral-700 font-medium mb-1">Lead Auditor Name</label>
+                <input
+                  type="text"
+                  value={auditorName}
+                  onChange={(e) => setAuditorName(e.target.value)}
+                  className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#e2e8f0]">
+                <button
+                  type="button"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="px-3 py-1.5 border border-[#e2e8f0] text-neutral-600 rounded-md font-medium hover:bg-neutral-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-1.5 bg-[#24b47e] hover:bg-[#1fa070] text-white rounded-md font-medium shadow-2xs flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  <span>{saving ? 'Saving...' : 'Start Audit'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
