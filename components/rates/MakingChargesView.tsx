@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
 import {
@@ -20,9 +21,26 @@ import {
   Hammer,
   Coins,
   Calculator,
+  Loader2,
+  Trash2,
+  AlertCircle,
+  Scale,
+  Gem,
+  Flame,
+  Store,
+  ExternalLink,
 } from 'lucide-react';
+import { db } from '@/lib/firebase';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  deleteDoc,
+  doc,
+  updateDoc,
+} from 'firebase/firestore';
 
-interface MakingChargeRule {
+export interface MakingChargeRule {
   id: string;
   category_name: string;
   charge_type: 'PERCENTAGE_OF_GOLD' | 'FIXED_PER_GRAM' | 'FLAT_PER_PIECE';
@@ -30,95 +48,24 @@ interface MakingChargeRule {
   min_charge_floor: number;
   festival_discount_pct: number;
   net_effective_charge: string;
+  metal_applicability: string;
+  karigar_department: string;
   status: 'ACTIVE' | 'INACTIVE';
   updated_at: string;
+  created_at?: string;
 }
-
-const INITIAL_MAKING_RULES: MakingChargeRule[] = [
-  {
-    id: 'mcr-001',
-    category_name: 'Plain Machine Bangles & Kadas',
-    charge_type: 'PERCENTAGE_OF_GOLD',
-    base_rate_value: 9.5,
-    min_charge_floor: 1200.0,
-    festival_discount_pct: 2.0,
-    net_effective_charge: '7.50% of gold value',
-    status: 'ACTIVE',
-    updated_at: '2026-10-28',
-  },
-  {
-    id: 'mcr-002',
-    category_name: 'Antique Temple Jewellery & Haar',
-    charge_type: 'PERCENTAGE_OF_GOLD',
-    base_rate_value: 16.5,
-    min_charge_floor: 3500.0,
-    festival_discount_pct: 2.0,
-    net_effective_charge: '14.50% of gold value',
-    status: 'ACTIVE',
-    updated_at: '2026-10-28',
-  },
-  {
-    id: 'mcr-003',
-    category_name: 'Solid Casting Rings & Bands',
-    charge_type: 'FIXED_PER_GRAM',
-    base_rate_value: 650.0,
-    min_charge_floor: 850.0,
-    festival_discount_pct: 10.0,
-    net_effective_charge: '₹ 585.00 / gram',
-    status: 'ACTIVE',
-    updated_at: '2026-10-28',
-  },
-  {
-    id: 'mcr-004',
-    category_name: 'Hollow Curb & Rope Chains',
-    charge_type: 'FIXED_PER_GRAM',
-    base_rate_value: 380.0,
-    min_charge_floor: 900.0,
-    festival_discount_pct: 0.0,
-    net_effective_charge: '₹ 380.00 / gram',
-    status: 'ACTIVE',
-    updated_at: '2026-10-25',
-  },
-  {
-    id: 'mcr-005',
-    category_name: 'Solitaire Diamond Mountings (18K)',
-    charge_type: 'FLAT_PER_PIECE',
-    base_rate_value: 8500.0,
-    min_charge_floor: 8500.0,
-    festival_discount_pct: 5.0,
-    net_effective_charge: '₹ 8,075.00 / piece',
-    status: 'ACTIVE',
-    updated_at: '2026-10-25',
-  },
-  {
-    id: 'mcr-006',
-    category_name: 'Handmade Filigree Earrings & Jhumkas',
-    charge_type: 'PERCENTAGE_OF_GOLD',
-    base_rate_value: 14.0,
-    min_charge_floor: 1500.0,
-    festival_discount_pct: 2.0,
-    net_effective_charge: '12.00% of gold value',
-    status: 'ACTIVE',
-    updated_at: '2026-10-25',
-  },
-  {
-    id: 'mcr-007',
-    category_name: 'Traditional Mangalsutra & Pendants',
-    charge_type: 'PERCENTAGE_OF_GOLD',
-    base_rate_value: 11.0,
-    min_charge_floor: 1800.0,
-    festival_discount_pct: 2.0,
-    net_effective_charge: '9.00% of gold value',
-    status: 'ACTIVE',
-    updated_at: '2026-10-20',
-  },
-];
 
 export function RatesMakingChargesView() {
   const [activeTab, setActiveTab] = useState<'data' | 'definition'>('data');
-  const [rules, setRules] = useState<MakingChargeRule[]>(INITIAL_MAKING_RULES);
+  const [rules, setRules] = useState<MakingChargeRule[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
+
+  // Toast
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'idle'>('idle');
 
   // Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -127,446 +74,631 @@ export function RatesMakingChargesView() {
   const [newBaseRate, setNewBaseRate] = useState('12.5');
   const [newMinFloor, setNewMinFloor] = useState('1500');
   const [newFestivalDiscount, setNewFestivalDiscount] = useState('2.0');
+  const [newMetalApplicability, setNewMetalApplicability] = useState('22K Gold (916)');
+  const [newKarigarDept, setNewKarigarDept] = useState('In-House Goldsmith Unit');
 
-  // Test Estimator State
-  const [testCategory, setTestCategory] = useState('Plain Machine Bangles & Kadas');
-  const [testWeightG, setTestWeightG] = useState('24.000');
-  const [testGoldRateG, setTestGoldRateG] = useState('7850');
+  // Interactive Live Making Calculator State
+  const [testCategory, setTestCategory] = useState('');
+  const [testWeight, setTestWeight] = useState('15.500');
+  const [testGoldRate, setTestGoldRate] = useState('7850');
 
-  const handleAddRule = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newCategory) return;
+  const showToast = (type: 'success' | 'error', msg: string) => {
+    setToastType(type);
+    setToastMessage(msg);
+    setTimeout(() => setToastType('idle'), 4000);
+  };
 
-    const baseVal = parseFloat(newBaseRate) || 0;
-    const discountVal = parseFloat(newFestivalDiscount) || 0;
-    const effectiveVal = baseVal * (1 - discountVal / 100);
-
-    let effectiveStr = '';
-    if (newType === 'PERCENTAGE_OF_GOLD') {
-      effectiveStr = `${(baseVal - discountVal).toFixed(2)}% of gold value`;
-    } else if (newType === 'FIXED_PER_GRAM') {
-      effectiveStr = `₹ ${effectiveVal.toFixed(2)} / gram`;
-    } else {
-      effectiveStr = `₹ ${effectiveVal.toFixed(2)} / piece`;
+  const fetchRules = async () => {
+    try {
+      setLoading(true);
+      const snapshot = await getDocs(collection(db, 'rates_making_charges'));
+      const list: MakingChargeRule[] = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, ...(d.data() as Omit<MakingChargeRule, 'id'>) });
+      });
+      list.sort((a, b) => {
+        if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1;
+        if (a.status !== 'ACTIVE' && b.status === 'ACTIVE') return 1;
+        return (b.created_at || '').localeCompare(a.created_at || '');
+      });
+      setRules(list);
+      if (list.length > 0 && !testCategory) {
+        setTestCategory(list[0].category_name);
+      }
+    } catch (err: any) {
+      console.error('Error fetching making charges:', err);
+      showToast('error', err.message || 'Failed to fetch making charges');
+    } finally {
+      setLoading(false);
     }
+  };
 
-    const item: MakingChargeRule = {
-      id: `mcr-${Date.now()}`,
-      category_name: newCategory,
+  useEffect(() => {
+    fetchRules();
+  }, []);
+
+  const calculateEffectiveString = (
+    type: 'PERCENTAGE_OF_GOLD' | 'FIXED_PER_GRAM' | 'FLAT_PER_PIECE',
+    base: number,
+    discount: number
+  ) => {
+    if (type === 'PERCENTAGE_OF_GOLD') {
+      const netPct = Math.max(0, base - discount);
+      return `${netPct.toFixed(2)}% of gold value`;
+    } else if (type === 'FIXED_PER_GRAM') {
+      const netPerG = Math.max(0, base * (1 - discount / 100));
+      return `₹ ${netPerG.toFixed(2)} / gram`;
+    } else {
+      const netPiece = Math.max(0, base * (1 - discount / 100));
+      return `₹ ${netPiece.toLocaleString('en-IN', { maximumFractionDigits: 2 })} / piece`;
+    }
+  };
+
+  const handleAddRule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCategory.trim()) return;
+
+    const base = parseFloat(newBaseRate) || 0;
+    const minFloor = parseFloat(newMinFloor) || 0;
+    const discount = parseFloat(newFestivalDiscount) || 0;
+    const effective = calculateEffectiveString(newType, base, discount);
+    const dateStr = new Date().toISOString().split('T')[0];
+
+    const newRule: Omit<MakingChargeRule, 'id'> = {
+      category_name: newCategory.trim(),
       charge_type: newType,
-      base_rate_value: baseVal,
-      min_charge_floor: parseFloat(newMinFloor) || 0,
-      festival_discount_pct: discountVal,
-      net_effective_charge: effectiveStr,
+      base_rate_value: base,
+      min_charge_floor: minFloor,
+      festival_discount_pct: discount,
+      net_effective_charge: effective,
+      metal_applicability: newMetalApplicability,
+      karigar_department: newKarigarDept,
       status: 'ACTIVE',
-      updated_at: '2026-10-31',
+      updated_at: dateStr,
+      created_at: new Date().toISOString(),
     };
 
-    setRules([item, ...rules]);
-    setIsAddModalOpen(false);
-    setNewCategory('');
+    try {
+      setSaving(true);
+      const docRef = await addDoc(collection(db, 'rates_making_charges'), newRule);
+      setRules((prev) => [{ id: docRef.id, ...newRule }, ...prev]);
+      setIsAddModalOpen(false);
+      showToast('success', `Making charge rule for "${newCategory}" saved.`);
+      // Reset form
+      setNewCategory('');
+      setNewBaseRate('12.5');
+      setNewMinFloor('1500');
+    } catch (err: any) {
+      console.error('Error saving making rule:', err);
+      showToast('error', err.message || 'Failed to save making rule');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggleStatus = async (id: string, currentStatus: string) => {
+    const nextStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    try {
+      await updateDoc(doc(db, 'rates_making_charges', id), { status: nextStatus });
+      setRules((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, status: nextStatus as any } : r))
+      );
+      showToast('success', `Status updated to ${nextStatus}`);
+    } catch (err: any) {
+      console.error('Error toggling status:', err);
+      showToast('error', err.message || 'Failed to update rule status');
+    }
+  };
+
+  const handleDeleteRule = async (id: string, catName: string) => {
+    if (!confirm(`Delete making charge rule for "${catName}"?`)) return;
+    try {
+      await deleteDoc(doc(db, 'rates_making_charges', id));
+      setRules((prev) => prev.filter((r) => r.id !== id));
+      showToast('success', `Rule for "${catName}" deleted.`);
+    } catch (err: any) {
+      console.error('Error deleting rule:', err);
+      showToast('error', err.message || 'Failed to delete rule');
+    }
   };
 
   const filteredRules = rules.filter((r) => {
     if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
     if (searchQuery.trim() !== '') {
       const q = searchQuery.toLowerCase();
-      return r.category_name.toLowerCase().includes(q) || r.net_effective_charge.toLowerCase().includes(q);
+      return (
+        r.category_name?.toLowerCase().includes(q) ||
+        r.charge_type?.toLowerCase().includes(q) ||
+        r.karigar_department?.toLowerCase().includes(q)
+      );
     }
     return true;
   });
 
-  // Test calculation computation
+  // Simulator calculation
   const selectedRule = rules.find((r) => r.category_name === testCategory) || rules[0];
-  const weight = parseFloat(testWeightG) || 0;
-  const goldRate = parseFloat(testGoldRateG) || 7850;
-  const goldTotal = weight * goldRate;
+  const wt = parseFloat(testWeight) || 0;
+  const gRate = parseFloat(testGoldRate) || 7850;
+  let simulatedMaking = 0;
 
-  let calculatedMC = 0;
-  if (selectedRule.charge_type === 'PERCENTAGE_OF_GOLD') {
-    const netPct = Math.max(0, selectedRule.base_rate_value - selectedRule.festival_discount_pct);
-    calculatedMC = goldTotal * (netPct / 100);
-  } else if (selectedRule.charge_type === 'FIXED_PER_GRAM') {
-    const netPerG = selectedRule.base_rate_value * (1 - selectedRule.festival_discount_pct / 100);
-    calculatedMC = weight * netPerG;
-  } else {
-    calculatedMC = selectedRule.base_rate_value * (1 - selectedRule.festival_discount_pct / 100);
+  if (selectedRule) {
+    if (selectedRule.charge_type === 'PERCENTAGE_OF_GOLD') {
+      const netPct = Math.max(0, selectedRule.base_rate_value - selectedRule.festival_discount_pct);
+      const goldVal = wt * gRate;
+      simulatedMaking = Math.max(selectedRule.min_charge_floor, (goldVal * netPct) / 100);
+    } else if (selectedRule.charge_type === 'FIXED_PER_GRAM') {
+      const netPerG = Math.max(0, selectedRule.base_rate_value * (1 - selectedRule.festival_discount_pct / 100));
+      simulatedMaking = Math.max(selectedRule.min_charge_floor, wt * netPerG);
+    } else {
+      const netFlat = Math.max(0, selectedRule.base_rate_value * (1 - selectedRule.festival_discount_pct / 100));
+      simulatedMaking = Math.max(selectedRule.min_charge_floor, netFlat);
+    }
   }
 
-  const finalMCWithFloor = Math.max(calculatedMC, selectedRule.min_charge_floor);
-
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0">
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0 font-sans">
       <TabBar title="rates_making_charges" />
       <ActionToolbar
-        filterPlaceholder="Filter by category, charge method, rate..."
-        insertLabel="Add Making Rule"
+        filterPlaceholder="Search making charges by category, charge type, or karigar..."
+        insertLabel="New Making Rule"
         onInsertClick={() => setIsAddModalOpen(true)}
+        onRefresh={fetchRules}
       />
 
       <div className="flex-1 overflow-y-auto bg-[#fafafa] flex flex-col custom-scrollbar w-full">
-        {/* KPI Metrics Summary Cards */}
-        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            {/* KPI 1 */}
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
+        <div className="p-4 flex flex-col gap-4 max-w-7xl w-full mx-auto">
+          {/* Toast Notification */}
+          {toastType === 'success' && (
+            <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{toastMessage}</span>
+            </div>
+          )}
+          {toastType === 'error' && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <span>{toastMessage}</span>
+            </div>
+          )}
+
+          {/* Cross-Module Navigation Hub */}
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-white border border-[#e2e8f0] rounded-lg shadow-2xs">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-medium text-neutral-500 uppercase tracking-wider">
+                Rates & Valuation Hub:
+              </span>
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <Link
+                  href="/rates/gold-rates"
+                  className="px-2.5 py-1 bg-white border border-neutral-200 text-neutral-600 hover:text-emerald-700 hover:border-emerald-200 rounded-md font-medium text-xs flex items-center gap-1 transition-colors"
+                >
+                  <Coins className="w-3 h-3 text-neutral-400" /> Gold Rates
+                </Link>
+                <Link
+                  href="/rates/silver-rates"
+                  className="px-2.5 py-1 bg-white border border-neutral-200 text-neutral-600 hover:text-emerald-700 hover:border-emerald-200 rounded-md font-medium text-xs flex items-center gap-1 transition-colors"
+                >
+                  <Scale className="w-3 h-3 text-neutral-400" /> Silver Bullion
+                </Link>
+                <Link
+                  href="/rates/making-charges"
+                  className="px-2.5 py-1 bg-emerald-50 border border-emerald-300 text-emerald-700 rounded-md font-medium text-xs flex items-center gap-1 shadow-2xs"
+                >
+                  <Percent className="w-3 h-3 text-emerald-600" /> Making Charges
+                </Link>
+                <Link
+                  href="/rates/wastage-rules"
+                  className="px-2.5 py-1 bg-white border border-neutral-200 text-neutral-600 hover:text-emerald-700 hover:border-emerald-200 rounded-md font-medium text-xs flex items-center gap-1 transition-colors"
+                >
+                  <Layers className="w-3 h-3 text-neutral-400" /> Wastage (VA)
+                </Link>
+                <Link
+                  href="/rates/diamond-valuation"
+                  className="px-2.5 py-1 bg-white border border-neutral-200 text-neutral-600 hover:text-emerald-700 hover:border-emerald-200 rounded-md font-medium text-xs flex items-center gap-1 transition-colors"
+                >
+                  <Gem className="w-3 h-3 text-neutral-400" /> Diamond 4Cs
+                </Link>
+                <Link
+                  href="/rates/old-gold-valuation"
+                  className="px-2.5 py-1 bg-white border border-neutral-200 text-neutral-600 hover:text-emerald-700 hover:border-emerald-200 rounded-md font-medium text-xs flex items-center gap-1 transition-colors"
+                >
+                  <Flame className="w-3 h-3 text-neutral-400" /> Old Gold Assay
+                </Link>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Link
+                href="/sales/billing-pos"
+                className="text-xs px-2.5 py-1 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 rounded-md font-medium flex items-center gap-1 transition-colors shadow-2xs"
+                title="Apply in Billing POS"
+              >
+                <Store className="w-3 h-3 text-emerald-600" />
+                <span>Open POS Billing</span>
+                <ArrowRight className="w-2.5 h-2.5" />
+              </Link>
+              <Link
+                href="/inventory/ornaments"
+                className="text-xs px-2.5 py-1 bg-white border border-neutral-200 text-neutral-700 hover:border-neutral-300 rounded-md font-medium flex items-center gap-1 transition-colors shadow-2xs"
+                title="Apply to Ornaments"
+              >
+                <span>Ornaments Stock</span>
+                <ExternalLink className="w-2.5 h-2.5 text-neutral-400" />
+              </Link>
+              <Link
+                href="/branches/rates"
+                className="text-xs px-2.5 py-1 bg-white border border-neutral-200 text-neutral-700 hover:border-neutral-300 rounded-md font-medium flex items-center gap-1 transition-colors shadow-2xs"
+                title="Branch Rate Adjustments"
+              >
+                <span>Branch Rates</span>
+              </Link>
+            </div>
+          </div>
+
+          {/* Metric Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
               <div className="flex items-center justify-between text-neutral-500 mb-1">
                 <span className="text-[11px] font-medium uppercase tracking-wider">Configured Rules</span>
-                <Hammer className="w-3.5 h-3.5 text-neutral-700" />
-              </div>
-              <div className="text-xl font-medium text-neutral-900">18 Categories</div>
-              <div className="text-[11px] text-emerald-600 mt-1 font-mono">
-                Plain, Casting & Antique
-              </div>
-            </div>
-
-            {/* KPI 2 */}
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-amber-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Plain Gold Avg MC</span>
-                <Percent className="w-3.5 h-3.5 text-amber-600" />
-              </div>
-              <div className="text-xl font-medium text-neutral-900">10.50%</div>
-              <div className="text-[11px] text-neutral-500 mt-1 font-mono">
-                Bangles, Chains & Rings
-              </div>
-            </div>
-
-            {/* KPI 3 */}
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-amber-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Antique / Temple MC</span>
-                <Percent className="w-3.5 h-3.5 text-amber-600" />
-              </div>
-              <div className="text-xl font-medium text-neutral-900">16.50%</div>
-              <div className="text-[11px] text-neutral-500 mt-1 font-mono">
-                Handcrafted Nakshi & Jadau
-              </div>
-            </div>
-
-            {/* KPI 4 */}
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Festival Override</span>
-                <Tag className="w-3.5 h-3.5 text-emerald-600" />
-              </div>
-              <div className="text-xl font-medium text-emerald-700">Active (-2% Off)</div>
-              <div className="text-[11px] text-emerald-600 mt-1 font-mono">
-                Diwali Festive Promotion
-              </div>
-            </div>
-
-            {/* KPI 5 */}
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-neutral-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Gross MC Margin</span>
-                <Coins className="w-3.5 h-3.5 text-neutral-600" />
-              </div>
-              <div className="text-xl font-medium text-neutral-900">14.8% Share</div>
-              <div className="text-[11px] text-neutral-500 mt-1 font-mono">
-                Net showroom revenue
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Interactive Making Charge Sandbox & Test Estimator */}
-        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Card 1: Promotional Policy Announcement */}
-          <div className="lg:col-span-2 p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-neutral-700 uppercase tracking-wider flex items-center gap-1.5">
-                  <Tag className="w-3.5 h-3.5 text-emerald-600" />
-                  Active Craftsmanship & Festive Making Policy
-                </span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono">
-                  Promotion Active
-                </span>
-              </div>
-              <p className="text-xs text-neutral-600 mb-3 leading-relaxed">
-                Making charges can be configured dynamically as either a percentage of the live 22K/18K gold value, a fixed rate per gross gram, or a flat fee per certified piece. Promotional festival discounts are automatically deducted at POS counters without overriding minimum cost floors.
-              </p>
-            </div>
-
-            <div className="flex items-center justify-between pt-2 border-t border-[#e2e8f0]">
-              <span className="text-[11px] text-neutral-500 font-mono">
-                Minimum charge floor prevents loss on lightweight intricate ornaments.
-              </span>
-              <button
-                onClick={() => setIsAddModalOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-neutral-900 text-white hover:bg-neutral-800 transition-colors shadow-2xs cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Add Category Making Rule</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Card 2: Interactive Sandbox Estimator */}
-          <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] flex flex-col justify-between">
-            <div>
-              <div className="text-xs font-medium text-neutral-700 uppercase tracking-wider mb-2 flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <Calculator className="w-3.5 h-3.5 text-neutral-700" />
-                  Rule Sandbox Tester
-                </span>
-                <span className="text-[10px] text-neutral-500 font-mono">Verify POS</span>
-              </div>
-
-              <div className="space-y-2 mb-2">
-                <div>
-                  <label className="text-[10px] font-medium text-neutral-600 block mb-0.5">Category</label>
-                  <select
-                    value={testCategory}
-                    onChange={(e) => setTestCategory(e.target.value)}
-                    className="w-full px-2 py-1 text-xs border border-[#e2e8f0] rounded bg-white text-neutral-800 focus:outline-none"
-                  >
-                    {rules.map((r) => (
-                      <option key={r.id} value={r.category_name}>
-                        {r.category_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] font-medium text-neutral-600 block mb-0.5">Weight (g)</label>
-                    <input
-                      type="number"
-                      step="0.001"
-                      value={testWeightG}
-                      onChange={(e) => setTestWeightG(e.target.value)}
-                      className="w-full px-2 py-1 text-xs border border-[#e2e8f0] rounded bg-white text-neutral-800 focus:outline-none font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-medium text-neutral-600 block mb-0.5">22K Rate (₹/g)</label>
-                    <input
-                      type="number"
-                      value={testGoldRateG}
-                      onChange={(e) => setTestGoldRateG(e.target.value)}
-                      className="w-full px-2 py-1 text-xs border border-[#e2e8f0] rounded bg-white text-neutral-800 focus:outline-none font-mono"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-[#e2e8f0] flex items-center justify-between text-xs">
-              <span className="text-neutral-500">Net Making Charge:</span>
-              <span className="text-sm font-medium text-emerald-700 font-mono">
-                ₹ {Math.round(finalMCWithFloor).toLocaleString('en-IN')}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Supabase-style Table / Schema Definition Section */}
-        <div className="p-4 sm:p-5 flex-1 flex flex-col">
-          <div className="bg-white border border-[#e5e7eb] rounded-lg shadow-2xs overflow-hidden flex flex-col flex-1">
-            {/* Table Header Info Bar */}
-            <div className="px-4 py-2.5 border-b border-[#e5e7eb] bg-[#f8fafc] flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2">
                 <Percent className="w-4 h-4 text-emerald-600" />
-                <span className="font-mono font-medium text-neutral-800">
-                  making_charge_rules
-                </span>
-                <span className="text-neutral-400">•</span>
-                <span className="text-neutral-500">
-                  Showing {filteredRules.length} of {rules.length} configured rules
+              </div>
+              <div className="text-xl font-medium text-neutral-800">{rules.length}</div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">
+                {rules.filter((r) => r.status === 'ACTIVE').length} active in POS
+              </div>
+            </div>
+
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">% Of Gold Value Rules</span>
+                <Sparkles className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-xl font-medium text-emerald-700">
+                {rules.filter((r) => r.charge_type === 'PERCENTAGE_OF_GOLD').length}
+              </div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">Bangles, Haar, Mangalsutra</div>
+            </div>
+
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Per-Gram Rules</span>
+                <Hammer className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-xl font-medium text-neutral-800">
+                {rules.filter((r) => r.charge_type === 'FIXED_PER_GRAM').length}
+              </div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">Chains & Casting Rings</div>
+            </div>
+
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Flat Piece Mountings</span>
+                <Tag className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-xl font-medium text-neutral-800">
+                {rules.filter((r) => r.charge_type === 'FLAT_PER_PIECE').length}
+              </div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">Solitaires & Jadau Studs</div>
+            </div>
+          </div>
+
+          {/* Interactive Live Making Calculator Simulator */}
+          <div className="bg-white p-4 rounded-lg border border-[#e2e8f0] shadow-2xs">
+            <div className="flex items-center justify-between border-b border-[#e2e8f0] pb-2 mb-3">
+              <div className="flex items-center gap-2">
+                <Calculator className="w-4 h-4 text-emerald-600" />
+                <span className="text-xs font-medium text-neutral-800">
+                  Making Charges Live Calculator Simulator
                 </span>
               </div>
+              <span className="text-[11px] text-neutral-500">
+                Tests minimum charge floor & festival discounts in real time
+              </span>
+            </div>
 
-              {/* Status Filter & Data/Definition Tab Toggle */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs mb-3">
+              <div>
+                <label className="block text-neutral-600 font-medium mb-1">Ornaments Category Rule</label>
+                <select
+                  value={testCategory}
+                  onChange={(e) => setTestCategory(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded bg-white text-neutral-800 focus:outline-none focus:border-emerald-500"
+                >
+                  {rules.length === 0 ? (
+                    <option value="">No categories available</option>
+                  ) : (
+                    rules.map((r) => (
+                      <option key={r.id} value={r.category_name}>
+                        {r.category_name} ({r.charge_type === 'PERCENTAGE_OF_GOLD' ? `${r.base_rate_value}%` : `₹${r.base_rate_value}`})
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-neutral-600 font-medium mb-1">Gross Ornament Weight (g)</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  value={testWeight}
+                  onChange={(e) => setTestWeight(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded bg-white text-neutral-800 focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-neutral-600 font-medium mb-1">Gold Rate Reference (₹ / g)</label>
+                <input
+                  type="number"
+                  step="10"
+                  value={testGoldRate}
+                  onChange={(e) => setTestGoldRate(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded bg-white text-neutral-800 focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="bg-[#f8fafc] p-3 rounded-md border border-[#e2e8f0] flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex flex-wrap gap-4 text-neutral-600">
+                <div>
+                  Charge Type:{' '}
+                  <span className="font-medium text-neutral-800">
+                    {selectedRule?.charge_type?.replace(/_/g, ' ') || 'N/A'}
+                  </span>
+                </div>
+                <div>
+                  Min Floor Protection:{' '}
+                  <span className="font-mono text-neutral-800">
+                    ₹{selectedRule?.min_charge_floor?.toLocaleString('en-IN') || 0}
+                  </span>
+                </div>
+                <div>
+                  Festival Concession:{' '}
+                  <span className="font-mono text-emerald-700">
+                    {selectedRule?.festival_discount_pct || 0}% off
+                  </span>
+                </div>
+              </div>
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 bg-white border border-[#e2e8f0] rounded-md px-2 py-1">
-                  <span className="text-[11px] text-neutral-500">Status:</span>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value as any)}
-                    className="bg-transparent text-xs text-neutral-800 focus:outline-none cursor-pointer"
-                  >
-                    <option value="ALL">All Rules</option>
-                    <option value="ACTIVE">Active Only</option>
-                    <option value="INACTIVE">Inactive</option>
-                  </select>
+                <span className="text-neutral-500 font-medium">Computed Making Fee:</span>
+                <span className="text-base font-mono font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded">
+                  ₹{simulatedMaking.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                </span>
+                <Link
+                  href="/sales/billing-pos"
+                  className="ml-2 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-medium flex items-center gap-1 transition-colors"
+                >
+                  <span>Apply in POS</span>
+                  <ArrowRight className="w-3 h-3" />
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          {/* Table Container */}
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-2xs overflow-hidden flex flex-col">
+            <div className="p-3 border-b border-[#e2e8f0] flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <Percent className="w-4 h-4 text-emerald-600" />
+                  <span className="text-xs font-medium text-neutral-800">Making Charges Matrix</span>
+                  <span className="text-[10px] text-neutral-400 font-mono bg-neutral-100 px-1.5 py-0.5 rounded">
+                    rates_making_charges
+                  </span>
                 </div>
 
-                <div className="flex items-center bg-neutral-200/60 p-0.5 rounded border border-neutral-300/60 text-[13px]">
+                <div className="h-4 w-[1px] bg-neutral-200" />
+
+                <div className="flex items-center gap-1 bg-[#f1f5f9] p-0.5 rounded">
                   <button
                     onClick={() => setActiveTab('data')}
-                    className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
+                    className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors ${
                       activeTab === 'data'
-                        ? 'bg-white text-neutral-900 shadow-2xs'
-                        : 'text-neutral-600 hover:text-neutral-900'
+                        ? 'bg-white text-neutral-800 shadow-2xs'
+                        : 'text-neutral-500 hover:text-neutral-800'
                     }`}
                   >
-                    Data
+                    Active Rules ({filteredRules.length})
                   </button>
                   <button
                     onClick={() => setActiveTab('definition')}
-                    className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
+                    className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors ${
                       activeTab === 'definition'
-                        ? 'bg-white text-neutral-900 shadow-2xs'
-                        : 'text-neutral-600 hover:text-neutral-900'
+                        ? 'bg-white text-neutral-800 shadow-2xs'
+                        : 'text-neutral-500 hover:text-neutral-800'
                     }`}
                   >
-                    Definition
+                    Schema Definition
                   </button>
                 </div>
               </div>
+
+              <div className="flex items-center gap-2">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as any)}
+                  className="text-xs px-2 py-1 border border-[#e2e8f0] rounded bg-white text-neutral-700 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="ACTIVE">Active Only</option>
+                  <option value="INACTIVE">Inactive</option>
+                </select>
+
+                <button
+                  onClick={() => setIsAddModalOpen(true)}
+                  className="px-3 py-1 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium flex items-center gap-1 transition-colors shadow-2xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>New Making Rule</span>
+                </button>
+              </div>
             </div>
 
-            {/* Table Content: Data Tab */}
             {activeTab === 'data' && (
-              <div className="flex-1 overflow-x-auto custom-scrollbar w-full">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-[#fcfcfc] border-b border-[#e5e7eb] text-neutral-600 font-mono text-[12px]">
-                      <th className="w-10 px-3 py-2 border-r border-[#e5e7eb] text-center">
-                        <input
-                          type="checkbox"
-                          className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                        />
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">category_name</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">varchar</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">calculation_method</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">type</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">base_rate_value</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">standard</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">min_floor_charge</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">₹_min</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">festive_discount</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">%_off</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">net_effective_charge</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">pos_rate</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 font-medium text-center whitespace-nowrap">
-                        <span className="text-neutral-800">status</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#e5e7eb]">
-                    {filteredRules.map((row) => (
-                      <tr key={row.id} className="hover:bg-[#f8fafc] transition-colors font-mono">
-                        <td className="px-3 py-2 border-r border-[#e5e7eb] text-center">
-                          <input
-                            type="checkbox"
-                            className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                          />
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-900 font-sans font-medium">
-                          {row.category_name}
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-600">
-                          <span className="bg-neutral-100 px-1.5 py-0.5 rounded text-[11px]">
-                            {row.charge_type.replace(/_/g, ' ')}
-                          </span>
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-800 font-medium">
-                          {row.charge_type === 'PERCENTAGE_OF_GOLD' ? `${row.base_rate_value}%` : `₹ ${row.base_rate_value.toFixed(2)}`}
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-700">
-                          ₹ {row.min_charge_floor.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-emerald-600">
-                          {row.festival_discount_pct > 0 ? `-${row.festival_discount_pct}%` : '0%'}
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-emerald-700 font-medium">
-                          {row.net_effective_charge}
-                        </td>
-                        <td className="px-3.5 py-2 whitespace-nowrap text-center">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                              row.status === 'ACTIVE'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-neutral-100 text-neutral-600 border border-neutral-200'
-                            }`}
-                          >
-                            {row.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                {loading ? (
+                  <div className="p-12 flex flex-col items-center justify-center gap-3 text-neutral-500">
+                    <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+                    <span className="text-xs font-medium">Loading making charges from Firestore...</span>
+                  </div>
+                ) : filteredRules.length === 0 ? (
+                  <div className="p-12 flex flex-col items-center justify-center text-center max-w-md mx-auto">
+                    <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center mb-3">
+                      <Percent className="w-6 h-6 text-emerald-600" />
+                    </div>
+                    <h3 className="text-sm font-medium text-neutral-800 mb-1">No Making Charge Rules Defined</h3>
+                    <p className="text-xs text-neutral-500 mb-4">
+                      Create standard making charge rules for machine bangles, antique temple jewellery, casting rings, or filigree work to auto-calculate labor in POS billing.
+                    </p>
+                    <button
+                      onClick={() => setIsAddModalOpen(true)}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium flex items-center gap-1.5 transition-colors shadow-2xs"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add First Making Rule</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-x-auto custom-scrollbar w-full">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-[#fcfcfc] border-b border-[#e5e7eb] text-neutral-600 font-mono text-[11px]">
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
+                            category_name
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
+                            charge_type
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
+                            base_rate
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
+                            min_floor
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
+                            discount
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
+                            net_effective
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
+                            applicability
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
+                            workshop_dept
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium text-center whitespace-nowrap">
+                            status
+                          </th>
+                          <th className="px-3 py-2 font-medium text-right whitespace-nowrap">
+                            actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#e5e7eb]">
+                        {filteredRules.map((row) => (
+                          <tr key={row.id} className="hover:bg-[#f8fafc] transition-colors">
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap">
+                              <span className="text-neutral-900 font-medium">{row.category_name}</span>
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap">
+                              <span className="text-neutral-700 bg-neutral-100 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                                {row.charge_type.replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-right font-mono text-neutral-800">
+                              {row.charge_type === 'PERCENTAGE_OF_GOLD' ? `${row.base_rate_value}%` : `₹${row.base_rate_value}`}
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-right font-mono text-neutral-700">
+                              ₹ {row.min_charge_floor?.toLocaleString('en-IN')}
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-right font-mono text-emerald-700">
+                              {row.festival_discount_pct > 0 ? `${row.festival_discount_pct}%` : '0%'}
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-emerald-800 font-medium">
+                              {row.net_effective_charge}
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-600 text-[11px]">
+                              {row.metal_applicability || '22K Gold'}
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-600 text-[11px]">
+                              {row.karigar_department || 'General Workshop'}
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-center">
+                              <button
+                                onClick={() => handleToggleStatus(row.id, row.status)}
+                                className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors cursor-pointer ${
+                                  row.status === 'ACTIVE'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                    : 'bg-neutral-100 text-neutral-600 border-neutral-200 hover:bg-neutral-200'
+                                }`}
+                                title="Click to toggle status"
+                              >
+                                {row.status}
+                              </button>
+                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap text-right">
+                              <button
+                                onClick={() => handleDeleteRule(row.id, row.category_name)}
+                                className="p-1 rounded text-neutral-400 hover:text-red-600 hover:bg-red-50"
+                                title="Delete Rule"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
             )}
 
-            {/* Table Content: Definition Tab */}
             {activeTab === 'definition' && (
-              <div className="p-4 overflow-x-auto font-mono text-xs text-neutral-800 bg-[#fbfbfb] w-full">
-                <div className="bg-neutral-900 text-neutral-100 p-4 rounded-md overflow-x-auto shadow-inner text-[12px] leading-relaxed w-full">
-                  <span className="text-emerald-400">CREATE TABLE</span> public.making_charge_rules (
+              <div className="p-4 bg-[#fbfbfb] text-xs font-mono">
+                <div className="bg-neutral-900 text-neutral-100 p-4 rounded-md overflow-x-auto shadow-inner text-[11px] leading-relaxed">
+                  <span className="text-emerald-400">CREATE TABLE</span> public.rates_making_charges (
                   <br />
                   <span className="pl-6 text-blue-300">id</span>{' '}
                   <span className="text-amber-300">uuid</span>{' '}
                   <span className="text-neutral-400">DEFAULT gen_random_uuid() PRIMARY KEY,</span>
                   <br />
                   <span className="pl-6 text-blue-300">category_name</span>{' '}
-                  <span className="text-amber-300">varchar(100)</span>{' '}
-                  <span className="text-neutral-400">UNIQUE NOT NULL,</span>
+                  <span className="text-amber-300">varchar(128)</span>{' '}
+                  <span className="text-neutral-400">NOT NULL,</span>
                   <br />
                   <span className="pl-6 text-blue-300">charge_type</span>{' '}
                   <span className="text-amber-300">varchar(32)</span>{' '}
                   <span className="text-neutral-400">NOT NULL CHECK (charge_type IN (&apos;PERCENTAGE_OF_GOLD&apos;, &apos;FIXED_PER_GRAM&apos;, &apos;FLAT_PER_PIECE&apos;)),</span>
                   <br />
-                  <span className="pl-6 text-blue-300">rate_value</span>{' '}
-                  <span className="text-amber-300">numeric(8,2)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL CHECK (rate_value &gt;= 0),</span>
+                  <span className="pl-6 text-blue-300">base_rate_value</span>{' '}
+                  <span className="text-amber-300">numeric(10,2)</span>{' '}
+                  <span className="text-neutral-400">NOT NULL,</span>
                   <br />
                   <span className="pl-6 text-blue-300">min_charge_floor</span>{' '}
-                  <span className="text-amber-300">numeric(8,2)</span>{' '}
-                  <span className="text-neutral-400">DEFAULT 0.00,</span>
+                  <span className="text-amber-300">numeric(10,2)</span>{' '}
+                  <span className="text-neutral-400">DEFAULT 0,</span>
                   <br />
                   <span className="pl-6 text-blue-300">festival_discount_pct</span>{' '}
                   <span className="text-amber-300">numeric(5,2)</span>{' '}
-                  <span className="text-neutral-400">DEFAULT 0.00,</span>
+                  <span className="text-neutral-400">DEFAULT 0,</span>
                   <br />
-                  <span className="pl-6 text-blue-300">is_active</span>{' '}
-                  <span className="text-amber-300">boolean</span>{' '}
-                  <span className="text-neutral-400">DEFAULT true,</span>
+                  <span className="pl-6 text-blue-300">net_effective_charge</span>{' '}
+                  <span className="text-amber-300">varchar(64)</span>,
                   <br />
-                  <span className="pl-6 text-blue-300">updated_at</span>{' '}
-                  <span className="text-amber-300">timestamptz</span>{' '}
-                  <span className="text-neutral-400">DEFAULT now()</span>
+                  <span className="pl-6 text-blue-300">metal_applicability</span>{' '}
+                  <span className="text-amber-300">varchar(64)</span>,
+                  <br />
+                  <span className="pl-6 text-blue-300">karigar_department</span>{' '}
+                  <span className="text-amber-300">varchar(128)</span>,
+                  <br />
+                  <span className="pl-6 text-blue-300">status</span>{' '}
+                  <span className="text-amber-300">varchar(16)</span>{' '}
+                  <span className="text-neutral-400">DEFAULT &apos;ACTIVE&apos;</span>
                   <br />
                   );
-                  <br />
-                  <br />
-                  <span className="text-neutral-500">-- Fast lookup on checkout billing</span>
-                  <br />
-                  <span className="text-emerald-400">CREATE INDEX</span> idx_making_category{' '}
-                  <span className="text-emerald-400">ON</span> public.making_charge_rules (category_name, is_active);
-                  <br />
-                  <span className="text-emerald-400">ALTER TABLE</span> public.making_charge_rules{' '}
-                  <span className="text-emerald-400">ENABLE ROW LEVEL SECURITY;</span>
                 </div>
               </div>
             )}
@@ -574,55 +706,55 @@ export function RatesMakingChargesView() {
         </div>
       </div>
 
-      {/* Add / Update Rule Modal */}
+      {/* Add Making Rule Modal */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-lg border border-[#e5e7eb] shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in duration-150">
-            <div className="px-5 py-3.5 border-b border-[#e5e7eb] bg-[#f8fafc] flex items-center justify-between">
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-xl w-full max-w-lg overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-[#e2e8f0]">
               <div className="flex items-center gap-2">
                 <Percent className="w-4 h-4 text-emerald-600" />
-                <span className="text-sm font-medium text-neutral-900">
-                  Add / Update Making Charge Rule
-                </span>
+                <h2 className="text-sm font-medium text-neutral-800">Add New Making Charge Rule</h2>
               </div>
               <button
                 onClick={() => setIsAddModalOpen(false)}
-                className="text-neutral-400 hover:text-neutral-700 p-1 rounded transition-colors"
+                className="text-neutral-400 hover:text-neutral-700"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleAddRule} className="p-5 space-y-4">
+            <form onSubmit={handleAddRule} className="p-4 space-y-3 text-xs">
               <div>
-                <label className="text-xs font-medium text-neutral-700 mb-1 block">Category Name</label>
+                <label className="block text-neutral-700 font-medium mb-1">
+                  Ornament Category / Design Style *
+                </label>
                 <input
                   type="text"
                   required
                   value={newCategory}
                   onChange={(e) => setNewCategory(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
-                  placeholder="e.g. Calcutta Handcrafted Bangles"
+                  className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                  placeholder="e.g. Antique Temple Choker or Calcutta Filigree"
                 />
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-neutral-700 mb-1 block">Calculation Method</label>
-                <select
-                  value={newType}
-                  onChange={(e) => setNewType(e.target.value as any)}
-                  className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
-                >
-                  <option value="PERCENTAGE_OF_GOLD">Percentage of Gold Metal Value (%)</option>
-                  <option value="FIXED_PER_GRAM">Fixed Rate per Gram (₹/g)</option>
-                  <option value="FLAT_PER_PIECE">Flat Charge per Piece (₹)</option>
-                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    {newType === 'PERCENTAGE_OF_GOLD' ? 'Base Rate (%)' : 'Base Rate (₹)'}
+                  <label className="block text-neutral-700 font-medium mb-1">Charge Type</label>
+                  <select
+                    value={newType}
+                    onChange={(e) => setNewType(e.target.value as any)}
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-700 focus:border-emerald-500 focus:outline-none"
+                  >
+                    <option value="PERCENTAGE_OF_GOLD">% of Gold Value</option>
+                    <option value="FIXED_PER_GRAM">Fixed Rate / Gram (₹)</option>
+                    <option value="FLAT_PER_PIECE">Flat Rate / Piece (₹)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">
+                    Base Value {newType === 'PERCENTAGE_OF_GOLD' ? '(%)' : '(₹)'} *
                   </label>
                   <input
                     type="number"
@@ -630,53 +762,102 @@ export function RatesMakingChargesView() {
                     required
                     value={newBaseRate}
                     onChange={(e) => setNewBaseRate(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
+                    className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none font-medium text-emerald-700"
                   />
                 </div>
+              </div>
 
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
+                  <label className="block text-neutral-700 font-medium mb-1">
                     Minimum Floor Charge (₹)
                   </label>
                   <input
                     type="number"
-                    step="50"
-                    required
                     value={newMinFloor}
                     onChange={(e) => setNewMinFloor(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
+                    className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">
+                    Festival / Promotional Discount (%)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={newFestivalDiscount}
+                    onChange={(e) => setNewFestivalDiscount(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
               </div>
 
-              <div>
-                <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                  Festival Promotional Discount (%)
-                </label>
-                <input
-                  type="number"
-                  step="0.5"
-                  value={newFestivalDiscount}
-                  onChange={(e) => setNewFestivalDiscount(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
-                  placeholder="e.g. 2.0"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">Metal Applicability</label>
+                  <select
+                    value={newMetalApplicability}
+                    onChange={(e) => setNewMetalApplicability(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-700 focus:border-emerald-500 focus:outline-none"
+                  >
+                    <option value="22K Gold (916)">22K Gold (916)</option>
+                    <option value="18K Gold (750)">18K Gold (750)</option>
+                    <option value="14K Gold (585)">14K Gold (585)</option>
+                    <option value="925 Sterling Silver">925 Sterling Silver</option>
+                    <option value="All Metals">All Metals</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">Karigar Department</label>
+                  <input
+                    type="text"
+                    value={newKarigarDept}
+                    onChange={(e) => setNewKarigarDept(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                    placeholder="e.g. Rajkot Unit, Bengal Unit"
+                  />
+                </div>
               </div>
 
-              <div className="pt-3 border-t border-[#e5e7eb] flex items-center justify-end gap-2">
+              {/* Effective calculation preview */}
+              <div className="bg-[#f8fafc] p-2.5 rounded border border-[#e2e8f0] flex items-center justify-between text-xs">
+                <span className="text-neutral-500 font-medium">Net Effective Rate:</span>
+                <span className="font-mono text-emerald-700 font-medium">
+                  {calculateEffectiveString(
+                    newType,
+                    parseFloat(newBaseRate) || 0,
+                    parseFloat(newFestivalDiscount) || 0
+                  )}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#e2e8f0]">
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 transition-colors cursor-pointer"
+                  className="px-3 py-1.5 border border-[#e2e8f0] text-neutral-600 rounded text-xs hover:bg-neutral-50 font-medium"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-2xs cursor-pointer"
+                  disabled={saving}
+                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
                 >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Save Making Rule</span>
+                  {saving ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Save Making Rule</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

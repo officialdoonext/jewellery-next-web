@@ -212,14 +212,17 @@ async function SubmenuContent({
     if (Comp) return <>{Comp}</>;
   }
 
-  if (moduleSlug === 'orders-services') {
+  if (moduleSlug === 'orders-services' || moduleSlug === 'orders') {
     const ordersMap: Record<string, React.ReactNode> = {
       'custom-orders': <OrdersCustomOrdersView />,
+      'custom': <OrdersCustomOrdersView />,
       'tracking': <OrdersTrackingView />,
       'repairs': <OrdersRepairsView />,
+      'repair': <OrdersRepairsView />,
       'job-work': <OrdersJobWorkView />,
       'goldsmith-ledger': <OrdersGoldsmithLedgerView />,
       'delivery-management': <OrdersDeliveryManagementView />,
+      'delivery': <OrdersDeliveryManagementView />,
     };
     const Comp = ordersMap[subpageSlug];
     if (Comp) return <>{Comp}</>;

@@ -1,6 +1,15 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
+import { db } from '@/lib/firebase';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  deleteDoc,
+  doc,
+} from 'firebase/firestore';
 import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
 import {
@@ -23,22 +32,34 @@ import {
   CheckCircle2,
   Printer,
   ChevronDown,
+  ChevronRight,
+  Trash2,
+  Loader2,
+  RotateCw,
+  ExternalLink,
+  Sparkles,
+  Layers,
+  Wrench,
+  Truck,
+  Receipt,
 } from 'lucide-react';
 
-interface LedgerEntry {
+export interface LedgerEntry {
   id: string;
+  goldsmith_name: string;
   entry_date: string;
   voucher_no: string;
   transaction_type: 'BULLION_ISSUE' | 'FINISHED_DELIVERY' | 'LABOUR_PAYMENT' | 'METAL_SETTLEMENT';
   particulars: string;
-  metal_debit_g: number; // Gold issued to artisan
-  metal_credit_g: number; // Gold returned by artisan
-  net_metal_balance_g: number; // Running metal balance
-  labour_earned: number; // Labour amount earned
-  labour_paid: number; // Labour paid to artisan
-  net_labour_due: number; // Running labour due
+  metal_debit_g: number;
+  metal_credit_g: number;
+  net_metal_balance_g: number;
+  labour_earned: number;
+  labour_paid: number;
+  net_labour_due: number;
   payment_mode?: 'UPI' | 'NEFT' | 'CASH' | 'CHEQUE';
   reference_job_order?: string;
+  created_at?: string;
 }
 
 const GOLDSMITHS_LIST = [
@@ -49,185 +70,270 @@ const GOLDSMITHS_LIST = [
   'Laxmi Casting Works',
 ];
 
-const INITIAL_LEDGER_ENTRIES: Record<string, LedgerEntry[]> = {
-  'Bhaskar Jewellers Workshop': [
-    {
-      id: 'led-01',
-      entry_date: '2026-10-18',
-      voucher_no: 'VCH-26-881',
-      transaction_type: 'BULLION_ISSUE',
-      particulars: 'Raw 24K Pure Gold Bar Issued for Bridal Sets',
-      metal_debit_g: 100.000,
-      metal_credit_g: 0.000,
-      net_metal_balance_g: 100.000,
-      labour_earned: 0,
-      labour_paid: 0,
-      net_labour_due: 0,
-      reference_job_order: 'JO-2026-195',
-    },
-    {
-      id: 'led-02',
-      entry_date: '2026-10-22',
-      voucher_no: 'DEL-26-402',
-      transaction_type: 'FINISHED_DELIVERY',
-      particulars: 'Finished 22K Haar & Kada delivered (91.450g) + Scrap (2.100g) + Wastage allowed (1.800g)',
-      metal_debit_g: 0.000,
-      metal_credit_g: 95.350,
-      net_metal_balance_g: 4.650,
-      labour_earned: 42000,
-      labour_paid: 0,
-      net_labour_due: 42000,
-      reference_job_order: 'JO-2026-195',
-    },
-    {
-      id: 'led-03',
-      entry_date: '2026-10-24',
-      voucher_no: 'PAY-26-119',
-      transaction_type: 'LABOUR_PAYMENT',
-      particulars: 'Weekly Labour advance payment via HDFC Bank NEFT',
-      metal_debit_g: 0.000,
-      metal_credit_g: 0.000,
-      net_metal_balance_g: 4.650,
-      labour_earned: 0,
-      labour_paid: 30000,
-      net_labour_due: 12000,
-      payment_mode: 'NEFT',
-    },
-    {
-      id: 'led-04',
-      entry_date: '2026-10-25',
-      voucher_no: 'VCH-26-895',
-      transaction_type: 'BULLION_ISSUE',
-      particulars: 'Raw 24K Gold Bar Issued for Temple Kada Pair',
-      metal_debit_g: 250.000,
-      metal_credit_g: 0.000,
-      net_metal_balance_g: 254.650,
-      labour_earned: 0,
-      labour_paid: 0,
-      net_labour_due: 12000,
-      reference_job_order: 'JO-2026-208',
-    },
-    {
-      id: 'led-05',
-      entry_date: '2026-10-29',
-      voucher_no: 'DEL-26-418',
-      transaction_type: 'FINISHED_DELIVERY',
-      particulars: 'Delivered Partial Batch: 2 Temple Kada (198.400g) + Filings returned (7.600g)',
-      metal_debit_g: 0.000,
-      metal_credit_g: 206.000,
-      net_metal_balance_g: 48.650,
-      labour_earned: 22200,
-      labour_paid: 0,
-      net_labour_due: 34200,
-      reference_job_order: 'JO-2026-208',
-    },
-  ],
-  'Ramesh Soni Karigar': [
-    {
-      id: 'led-06',
-      entry_date: '2026-10-20',
-      voucher_no: 'VCH-26-889',
-      transaction_type: 'BULLION_ISSUE',
-      particulars: 'Raw 24K Gold Issued for Chain Links',
-      metal_debit_g: 150.000,
-      metal_credit_g: 0.000,
-      net_metal_balance_g: 150.000,
-      labour_earned: 0,
-      labour_paid: 0,
-      net_labour_due: 0,
-      reference_job_order: 'JO-2026-198',
-    },
-    {
-      id: 'led-07',
-      entry_date: '2026-10-27',
-      voucher_no: 'DEL-26-411',
-      transaction_type: 'FINISHED_DELIVERY',
-      particulars: 'Delivered 8 Chains (132.500g) + Scrap (14.200g)',
-      metal_debit_g: 0.000,
-      metal_credit_g: 146.700,
-      net_metal_balance_g: 3.300,
-      labour_earned: 18500,
-      labour_paid: 18500,
-      net_labour_due: 0,
-      payment_mode: 'UPI',
-    },
-  ],
-};
+const SAMPLE_LEDGER_SEED: Omit<LedgerEntry, 'id'>[] = [
+  {
+    goldsmith_name: 'Bhaskar Jewellers Workshop',
+    entry_date: '2026-10-18',
+    voucher_no: 'VCH-26-881',
+    transaction_type: 'BULLION_ISSUE',
+    particulars: 'Raw 24K Pure Gold Bar Issued for Bridal Sets',
+    metal_debit_g: 100.0,
+    metal_credit_g: 0.0,
+    net_metal_balance_g: 100.0,
+    labour_earned: 0,
+    labour_paid: 0,
+    net_labour_due: 0,
+    reference_job_order: 'JO-2026-195',
+    created_at: '2026-10-18',
+  },
+  {
+    goldsmith_name: 'Bhaskar Jewellers Workshop',
+    entry_date: '2026-10-22',
+    voucher_no: 'DEL-26-402',
+    transaction_type: 'FINISHED_DELIVERY',
+    particulars: 'Finished 22K Haar & Kada delivered (91.450g) + Scrap (2.100g) + Wastage allowed (1.800g)',
+    metal_debit_g: 0.0,
+    metal_credit_g: 95.35,
+    net_metal_balance_g: 4.65,
+    labour_earned: 42000,
+    labour_paid: 0,
+    net_labour_due: 42000,
+    reference_job_order: 'JO-2026-195',
+    created_at: '2026-10-22',
+  },
+  {
+    goldsmith_name: 'Bhaskar Jewellers Workshop',
+    entry_date: '2026-10-24',
+    voucher_no: 'PAY-26-119',
+    transaction_type: 'LABOUR_PAYMENT',
+    particulars: 'Weekly Labour advance payment via HDFC Bank NEFT',
+    metal_debit_g: 0.0,
+    metal_credit_g: 0.0,
+    net_metal_balance_g: 4.65,
+    labour_earned: 0,
+    labour_paid: 30000,
+    net_labour_due: 12000,
+    payment_mode: 'NEFT',
+    created_at: '2026-10-24',
+  },
+  {
+    goldsmith_name: 'Bhaskar Jewellers Workshop',
+    entry_date: '2026-10-25',
+    voucher_no: 'VCH-26-895',
+    transaction_type: 'BULLION_ISSUE',
+    particulars: 'Raw 24K Gold Bar Issued for Temple Kada Pair',
+    metal_debit_g: 250.0,
+    metal_credit_g: 0.0,
+    net_metal_balance_g: 254.65,
+    labour_earned: 0,
+    labour_paid: 0,
+    net_labour_due: 12000,
+    reference_job_order: 'JO-2026-208',
+    created_at: '2026-10-25',
+  },
+  {
+    goldsmith_name: 'Ramesh Soni Karigar',
+    entry_date: '2026-10-20',
+    voucher_no: 'VCH-26-889',
+    transaction_type: 'BULLION_ISSUE',
+    particulars: 'Raw 24K Gold Issued for Chain Links',
+    metal_debit_g: 150.0,
+    metal_credit_g: 0.0,
+    net_metal_balance_g: 150.0,
+    labour_earned: 0,
+    labour_paid: 0,
+    net_labour_due: 0,
+    reference_job_order: 'JO-2026-198',
+    created_at: '2026-10-20',
+  },
+  {
+    goldsmith_name: 'Ramesh Soni Karigar',
+    entry_date: '2026-10-27',
+    voucher_no: 'DEL-26-411',
+    transaction_type: 'FINISHED_DELIVERY',
+    particulars: 'Delivered 8 Chains (132.500g) + Scrap (14.200g)',
+    metal_debit_g: 0.0,
+    metal_credit_g: 146.7,
+    net_metal_balance_g: 3.3,
+    labour_earned: 18500,
+    labour_paid: 18500,
+    net_labour_due: 0,
+    payment_mode: 'UPI',
+    created_at: '2026-10-27',
+  },
+];
 
 export function OrdersGoldsmithLedgerView() {
+  const [entries, setEntries] = useState<LedgerEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [selectedGoldsmith, setSelectedGoldsmith] = useState<string>(GOLDSMITHS_LIST[0]);
   const [activeTab, setActiveTab] = useState<'data' | 'definition'>('data');
   const [searchQuery, setSearchQuery] = useState('');
   const [startDate, setStartDate] = useState('2026-10-01');
-  const [endDate, setEndDate] = useState('2026-10-31');
+  const [endDate, setEndDate] = useState('2026-11-30');
   const [isSettlementOpen, setIsSettlementOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Settlement Form State
   const [settlementType, setSettlementType] = useState<'LABOUR_PAYMENT' | 'METAL_SETTLEMENT' | 'COMBINED'>('LABOUR_PAYMENT');
-  const [settleVoucherNo, setSettleVoucherNo] = useState('PAY-26-128');
-  const [settleMetalGrams, setSettleMetalGrams] = useState('48.650');
-  const [settleLabourAmount, setSettleLabourAmount] = useState('34200');
+  const [settleVoucherNo, setSettleVoucherNo] = useState('');
+  const [settleMetalGrams, setSettleMetalGrams] = useState('0.000');
+  const [settleLabourAmount, setSettleLabourAmount] = useState('10000');
   const [settlePaymentMode, setSettlePaymentMode] = useState<'UPI' | 'NEFT' | 'CASH' | 'CHEQUE'>('NEFT');
-  const [settleNotes, setSettleNotes] = useState('Full settlement of pending labour charges.');
+  const [settleNotes, setSettleNotes] = useState('Labour settlement payment.');
+  const [settleRefJob, setSettleRefJob] = useState('');
 
-  const currentLedger = useMemo(() => {
-    return INITIAL_LEDGER_ENTRIES[selectedGoldsmith] || [];
-  }, [selectedGoldsmith]);
+  // Toast feedback state
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'idle'>('idle');
+
+  const showToast = (type: 'success' | 'error', msg: string) => {
+    setToastType(type);
+    setToastMessage(msg);
+    setTimeout(() => setToastType('idle'), 4000);
+  };
+
+  const fetchLedger = async () => {
+    try {
+      setLoading(true);
+      const snapshot = await getDocs(collection(db, 'orders_goldsmith_ledger'));
+      const list: LedgerEntry[] = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, ...(d.data() as Omit<LedgerEntry, 'id'>) });
+      });
+      list.sort((a, b) => (a.entry_date > b.entry_date ? 1 : -1));
+      setEntries(list);
+    } catch (err: any) {
+      console.error('Error fetching ledger entries:', err);
+      showToast('error', err.message || 'Failed to fetch goldsmith ledger');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLedger();
+  }, []);
+
+  const openSettlementDrawer = () => {
+    setSettleVoucherNo(`VCH-${Date.now().toString().slice(-4)}`);
+    setIsSettlementOpen(true);
+  };
+
+  const handleSeedSamples = async () => {
+    try {
+      setSaving(true);
+      const added: LedgerEntry[] = [];
+      for (const item of SAMPLE_LEDGER_SEED) {
+        const docRef = await addDoc(collection(db, 'orders_goldsmith_ledger'), item);
+        added.push({ id: docRef.id, ...item });
+      }
+      setEntries((prev) => [...added, ...prev]);
+      showToast('success', `${added.length} sample ledger entries added to Firestore.`);
+    } catch (err: any) {
+      console.error('Error seeding ledger:', err);
+      showToast('error', err.message || 'Failed to seed sample ledger entries');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Filter entries for the selected artisan
+  const artisanEntries = useMemo(() => {
+    return entries.filter((e) => e.goldsmith_name === selectedGoldsmith);
+  }, [entries, selectedGoldsmith]);
 
   // Running totals for the selected artisan
   const ledgerMetrics = useMemo(() => {
-    const lastRow = currentLedger[currentLedger.length - 1];
+    const totalDebit = artisanEntries.reduce((acc, r) => acc + (Number(r.metal_debit_g) || 0), 0);
+    const totalCredit = artisanEntries.reduce((acc, r) => acc + (Number(r.metal_credit_g) || 0), 0);
+    const netMetal = Math.max(0, totalDebit - totalCredit);
+
+    const totalEarned = artisanEntries.reduce((acc, r) => acc + (Number(r.labour_earned) || 0), 0);
+    const totalPaid = artisanEntries.reduce((acc, r) => acc + (Number(r.labour_paid) || 0), 0);
+    const netLabour = Math.max(0, totalEarned - totalPaid);
+
     return {
-      pendingMetalBalance: lastRow ? lastRow.net_metal_balance_g : 48.65,
-      unsettledLabourDue: lastRow ? lastRow.net_labour_due : 34200,
-      activeJobs: 3,
-      lastAuditDate: 'Oct 25, 2026',
+      pendingMetalBalance: netMetal,
+      unsettledLabourDue: netLabour,
+      totalEntries: artisanEntries.length,
+      lastAuditDate: artisanEntries.length > 0 ? artisanEntries[artisanEntries.length - 1].entry_date : 'N/A',
     };
-  }, [currentLedger]);
+  }, [artisanEntries]);
 
   const filteredEntries = useMemo(() => {
-    return currentLedger.filter((entry) => {
+    return artisanEntries.filter((entry) => {
       const matchSearch =
-        entry.voucher_no.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        entry.particulars.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (entry.voucher_no || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (entry.particulars || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (entry.reference_job_order && entry.reference_job_order.toLowerCase().includes(searchQuery.toLowerCase()));
       return matchSearch;
     });
-  }, [currentLedger, searchQuery]);
+  }, [artisanEntries, searchQuery]);
 
-  const handleSaveSettlement = (e: React.FormEvent) => {
+  const handleSaveSettlement = async (e: React.FormEvent) => {
     e.preventDefault();
-    const lastRow = currentLedger[currentLedger.length - 1];
-    const prevMetal = lastRow ? lastRow.net_metal_balance_g : 0;
-    const prevLabour = lastRow ? lastRow.net_labour_due : 0;
+    try {
+      setSaving(true);
+      let metalCredit = 0;
+      let labourPaid = 0;
 
-    let metalCredit = 0;
-    let labourPaid = 0;
+      if (settlementType === 'METAL_SETTLEMENT' || settlementType === 'COMBINED') {
+        metalCredit = parseFloat(settleMetalGrams) || 0;
+      }
+      if (settlementType === 'LABOUR_PAYMENT' || settlementType === 'COMBINED') {
+        labourPaid = parseFloat(settleLabourAmount) || 0;
+      }
 
-    if (settlementType === 'METAL_SETTLEMENT' || settlementType === 'COMBINED') {
-      metalCredit = parseFloat(settleMetalGrams) || 0;
+      const newMetalBalance = Math.max(0, ledgerMetrics.pendingMetalBalance - metalCredit);
+      const newLabourDue = Math.max(0, ledgerMetrics.unsettledLabourDue - labourPaid);
+
+      const newEntryData: Omit<LedgerEntry, 'id'> = {
+        goldsmith_name: selectedGoldsmith,
+        entry_date: new Date().toISOString().slice(0, 10),
+        voucher_no: settleVoucherNo || `VCH-${Date.now().toString().slice(-4)}`,
+        transaction_type:
+          settlementType === 'METAL_SETTLEMENT'
+            ? 'METAL_SETTLEMENT'
+            : 'LABOUR_PAYMENT',
+        particulars: `${settleNotes} (${settlePaymentMode})`,
+        metal_debit_g: 0,
+        metal_credit_g: metalCredit,
+        net_metal_balance_g: newMetalBalance,
+        labour_earned: 0,
+        labour_paid: labourPaid,
+        net_labour_due: newLabourDue,
+        payment_mode: settlePaymentMode,
+        reference_job_order: settleRefJob || undefined,
+        created_at: new Date().toISOString().slice(0, 10),
+      };
+
+      const docRef = await addDoc(collection(db, 'orders_goldsmith_ledger'), newEntryData);
+      setEntries([...entries, { id: docRef.id, ...newEntryData }]);
+      setIsSettlementOpen(false);
+      showToast('success', `Voucher #${newEntryData.voucher_no} posted to ${selectedGoldsmith} ledger.`);
+    } catch (err: any) {
+      console.error('Error posting settlement:', err);
+      showToast('error', err.message || 'Failed to post settlement');
+    } finally {
+      setSaving(false);
     }
-    if (settlementType === 'LABOUR_PAYMENT' || settlementType === 'COMBINED') {
-      labourPaid = parseFloat(settleLabourAmount) || 0;
+  };
+
+  const handleDeleteEntry = async (entryId: string) => {
+    if (!confirm('Are you sure you want to delete this ledger transaction voucher?')) return;
+    try {
+      setDeletingId(entryId);
+      await deleteDoc(doc(db, 'orders_goldsmith_ledger', entryId));
+      setEntries((prev) => prev.filter((e) => e.id !== entryId));
+      showToast('success', 'Ledger transaction deleted successfully.');
+    } catch (err: any) {
+      console.error('Error deleting entry:', err);
+      showToast('error', err.message || 'Failed to delete ledger entry');
+    } finally {
+      setDeletingId(null);
     }
-
-    const newEntry: LedgerEntry = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `led-${Date.now()}`,
-      entry_date: new Date().toISOString().slice(0, 10),
-      voucher_no: settleVoucherNo,
-      transaction_type: settlementType === 'METAL_SETTLEMENT' ? 'METAL_SETTLEMENT' : 'LABOUR_PAYMENT',
-      particulars: `${settleNotes} (${settlePaymentMode})`,
-      metal_debit_g: 0,
-      metal_credit_g: metalCredit,
-      net_metal_balance_g: Math.max(0, prevMetal - metalCredit),
-      labour_earned: 0,
-      labour_paid: labourPaid,
-      net_labour_due: Math.max(0, prevLabour - labourPaid),
-      payment_mode: settlePaymentMode,
-    };
-
-    INITIAL_LEDGER_ENTRIES[selectedGoldsmith] = [...currentLedger, newEntry];
-    setIsSettlementOpen(false);
   };
 
   return (
@@ -236,11 +342,97 @@ export function OrdersGoldsmithLedgerView() {
       <ActionToolbar
         filterPlaceholder="Filter ledger vouchers, job orders, settlement particulars..."
         insertLabel="Settle / Pay Labour"
-        onInsertClick={() => setIsSettlementOpen(true)}
+        onInsertClick={openSettlementDrawer}
       />
 
+      {/* Interlinked Module Navigation Header */}
+      <div className="bg-white border-b border-[#e2e8f0] px-4 py-2 flex items-center justify-between gap-2 overflow-x-auto no-scrollbar text-xs">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider mr-1">Workflow:</span>
+          <Link
+            href="/orders-services/custom-orders"
+            className="px-2.5 py-1 rounded hover:bg-neutral-100 text-neutral-600 font-medium border border-[#e2e8f0] flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <Sparkles className="w-3 h-3 text-neutral-500" /> Custom Orders
+          </Link>
+          <Link
+            href="/orders-services/tracking"
+            className="px-2.5 py-1 rounded hover:bg-neutral-100 text-neutral-600 font-medium border border-[#e2e8f0] flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <Layers className="w-3 h-3 text-neutral-500" /> Production Pipeline
+          </Link>
+          <Link
+            href="/orders-services/repairs"
+            className="px-2.5 py-1 rounded hover:bg-neutral-100 text-neutral-600 font-medium border border-[#e2e8f0] flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <Wrench className="w-3 h-3 text-neutral-500" /> Repairs
+          </Link>
+          <Link
+            href="/orders-services/job-work"
+            className="px-2.5 py-1 rounded hover:bg-neutral-100 text-neutral-600 font-medium border border-[#e2e8f0] flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <Scale className="w-3 h-3 text-neutral-500" /> Job Work
+          </Link>
+          <Link
+            href="/orders-services/goldsmith-ledger"
+            className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 font-medium border border-emerald-200 flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <FileText className="w-3 h-3 text-emerald-600" /> Karigar Ledger
+          </Link>
+          <Link
+            href="/orders-services/delivery-management"
+            className="px-2.5 py-1 rounded hover:bg-neutral-100 text-neutral-600 font-medium border border-[#e2e8f0] flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <Truck className="w-3 h-3 text-neutral-500" /> Secure Delivery
+          </Link>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <Link
+            href="/purchases/job-worker-receipts"
+            className="px-2 py-1 rounded text-[11px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors flex items-center gap-1 shadow-2xs"
+          >
+            <Scale className="w-3 h-3" /> Reconcile Loss
+          </Link>
+          <button
+            onClick={fetchLedger}
+            disabled={loading}
+            className="p-1 rounded text-neutral-500 hover:text-emerald-700 hover:bg-neutral-100 transition-colors cursor-pointer"
+            title="Refresh Ledger"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-emerald-600' : ''}`} />
+          </button>
+        </div>
+      </div>
+
       <div className="flex-1 overflow-y-auto bg-[#fafafa] flex flex-col custom-scrollbar w-full">
-        {/* Artisan Selector & Date Range Filter Bar */}
+        {/* Toast Feedback */}
+        {toastType !== 'idle' && (
+          <div
+            className={`border-b px-4 py-2 text-xs font-medium flex items-center justify-between animate-fadeIn ${
+              toastType === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {toastType === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-red-600" />
+              )}
+              <span>{toastMessage}</span>
+            </div>
+            <button
+              onClick={() => setToastType('idle')}
+              className="text-neutral-500 hover:text-neutral-800 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Artisan Selector Bar */}
         <div className="p-4 bg-white border-b border-[#e2e8f0] flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <div className="p-2 rounded bg-amber-50 text-amber-700">
@@ -248,7 +440,7 @@ export function OrdersGoldsmithLedgerView() {
             </div>
             <div>
               <span className="text-[10px] uppercase font-medium text-neutral-500 tracking-wider block">
-                Select Artisan Workshop Account
+                Artisan Workshop Account
               </span>
               <select
                 value={selectedGoldsmith}
@@ -265,22 +457,12 @@ export function OrdersGoldsmithLedgerView() {
           </div>
 
           <div className="flex items-center gap-2 text-xs">
-            <span className="text-neutral-500 flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5 text-neutral-400" /> Date Range:
-            </span>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="px-2 py-1 text-xs border border-[#e2e8f0] rounded bg-[#f8fafc] text-neutral-700"
-            />
-            <span className="text-neutral-400">to</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="px-2 py-1 text-xs border border-[#e2e8f0] rounded bg-[#f8fafc] text-neutral-700"
-            />
+            <Link
+              href="/orders-services/job-work"
+              className="text-emerald-700 hover:underline flex items-center gap-1 font-medium"
+            >
+              Issue Raw Gold to {selectedGoldsmith.split(' ')[0]} <ChevronRight className="w-3 h-3" />
+            </Link>
           </div>
         </div>
 
@@ -323,39 +505,41 @@ export function OrdersGoldsmithLedgerView() {
           <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[11px] font-medium text-neutral-500 uppercase tracking-wider">
-                Active Job Orders
+                Total Ledger Vouchers
               </span>
               <span className="p-1 rounded bg-blue-50 text-blue-600">
                 <FileText className="w-3.5 h-3.5" />
               </span>
             </div>
             <div className="text-xl font-medium text-neutral-800 font-mono">
-              {ledgerMetrics.activeJobs} Orders
+              {ledgerMetrics.totalEntries} Vouchers
             </div>
             <div className="text-[11px] text-neutral-500 mt-1 flex items-center gap-1">
-              Open manufacturing vouchers
+              Recorded in live Firestore
             </div>
           </div>
 
           <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[11px] font-medium text-neutral-500 uppercase tracking-wider">
-                Last Physical Audit
+                Raw Gold Reconcile Link
               </span>
               <span className="p-1 rounded bg-purple-50 text-purple-600">
-                <CheckCircle2 className="w-3.5 h-3.5" />
+                <Scale className="w-3.5 h-3.5" />
               </span>
             </div>
             <div className="text-xl font-medium text-neutral-800 font-mono">
-              {ledgerMetrics.lastAuditDate}
+              Audit Status
             </div>
             <div className="text-[11px] text-neutral-500 mt-1 flex items-center gap-1">
-              Vault weigh-in verified
+              <Link href="/purchases/job-worker-receipts" className="text-emerald-700 hover:underline flex items-center gap-0.5">
+                Inspect Worker Receipts <ChevronRight className="w-3 h-3" />
+              </Link>
             </div>
           </div>
         </div>
 
-        {/* Tab Switcher: Statement Data vs Definition */}
+        {/* Tab Switcher & Search */}
         <div className="px-4 pb-2 flex items-center justify-between border-b border-[#e2e8f0]">
           <div className="flex items-center gap-1">
             <button
@@ -379,105 +563,171 @@ export function OrdersGoldsmithLedgerView() {
               Schema Definition (DDL)
             </button>
           </div>
+
+          {activeTab === 'data' && (
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search vouchers..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-8 pr-3 py-1 rounded text-xs border border-[#e2e8f0] bg-white focus:outline-none focus:border-emerald-500 w-48"
+              />
+            </div>
+          )}
         </div>
 
-        {/* View Mode: Real-time Statement Data Table */}
+        {/* View Mode: Statement Data Table */}
         {activeTab === 'data' ? (
           <div className="flex-1 p-4">
-            <div className="bg-white border border-[#e2e8f0] rounded-lg shadow-2xs overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-[#f8fafc] border-b border-[#e2e8f0] text-neutral-500 font-medium">
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">Date</th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">Voucher #</th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb]">Particulars & Job Reference</th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap text-amber-700 bg-amber-50/20">
-                        Metal Dr (g Issued)
-                      </th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap text-emerald-700 bg-emerald-50/20">
-                        Metal Cr (g Returned)
-                      </th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap font-medium text-neutral-900">
-                        Net Metal Balance (g)
-                      </th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap">
-                        Labour Earned (₹)
-                      </th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap text-emerald-700">
-                        Labour Paid (₹)
-                      </th>
-                      <th className="py-2.5 px-3 text-right whitespace-nowrap font-medium text-neutral-900">
-                        Net Labour Due (₹)
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#f1f5f9]">
-                    {filteredEntries.map((row) => (
-                      <tr key={row.id} className="hover:bg-[#f8fafc] transition-colors">
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap font-mono text-neutral-600">
-                          {row.entry_date}
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap font-mono">
-                          <span className="font-medium text-neutral-800">{row.voucher_no}</span>
-                          {row.reference_job_order && (
-                            <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-100 block mt-0.5">
-                              {row.reference_job_order}
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb]">
-                          <div className="font-medium text-neutral-800">{row.particulars}</div>
-                          {row.payment_mode && (
-                            <span className="text-[10px] font-mono text-blue-600">
-                              Mode: {row.payment_mode}
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono whitespace-nowrap bg-amber-50/20">
-                          {row.metal_debit_g > 0 ? (
-                            <span className="font-medium text-amber-700">
-                              +{row.metal_debit_g.toFixed(3)} g
-                            </span>
-                          ) : (
-                            <span className="text-neutral-300">-</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono whitespace-nowrap bg-emerald-50/20">
-                          {row.metal_credit_g > 0 ? (
-                            <span className="font-medium text-emerald-700">
-                              -{row.metal_credit_g.toFixed(3)} g
-                            </span>
-                          ) : (
-                            <span className="text-neutral-300">-</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono whitespace-nowrap font-medium text-neutral-900">
-                          {row.net_metal_balance_g.toFixed(3)} g
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono whitespace-nowrap">
-                          {row.labour_earned > 0 ? (
-                            <span>₹ {row.labour_earned.toLocaleString('en-IN')}</span>
-                          ) : (
-                            <span className="text-neutral-300">-</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono whitespace-nowrap text-emerald-700">
-                          {row.labour_paid > 0 ? (
-                            <span>₹ {row.labour_paid.toLocaleString('en-IN')}</span>
-                          ) : (
-                            <span className="text-neutral-300">-</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono whitespace-nowrap font-medium text-neutral-900">
-                          ₹ {row.net_labour_due.toLocaleString('en-IN')}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {loading ? (
+              <div className="bg-white border border-[#e2e8f0] rounded-lg p-12 flex flex-col items-center justify-center text-center">
+                <Loader2 className="w-8 h-8 text-emerald-600 animate-spin mb-3" />
+                <h3 className="text-sm font-medium text-neutral-800">Loading Goldsmith Ledger...</h3>
+                <p className="text-xs text-neutral-500 mt-1">Connecting to Firestore collection &apos;orders_goldsmith_ledger&apos;</p>
               </div>
-            </div>
+            ) : filteredEntries.length === 0 ? (
+              <div className="bg-white border border-[#e2e8f0] rounded-lg p-12 flex flex-col items-center justify-center text-center">
+                <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mb-3">
+                  <Coins className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-medium text-neutral-800">No Ledger Entries for {selectedGoldsmith}</h3>
+                <p className="text-xs text-neutral-500 max-w-md mt-1 mb-4">
+                  {searchQuery
+                    ? 'No vouchers matched your search term.'
+                    : 'There are no metal issue, delivery, or payment vouchers recorded for this artisan workshop.'}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={openSettlementDrawer}
+                    className="px-3.5 py-2 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Post Settlement / Voucher
+                  </button>
+                  {entries.length === 0 && (
+                    <button
+                      onClick={handleSeedSamples}
+                      disabled={saving}
+                      className="px-3.5 py-2 rounded-md bg-white border border-[#e2e8f0] text-neutral-700 text-xs font-medium hover:bg-neutral-50 transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" /> : <Coins className="w-3.5 h-3.5 text-amber-600" />}
+                      Load Sample Ledger
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white border border-[#e2e8f0] rounded-lg shadow-2xs overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-[#f8fafc] border-b border-[#e2e8f0] text-neutral-500 font-medium">
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">Date</th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">Voucher #</th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb]">Particulars & Job Reference</th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap text-amber-700 bg-amber-50/20">
+                          Metal Dr (g Issued)
+                        </th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap text-emerald-700 bg-emerald-50/20">
+                          Metal Cr (g Returned)
+                        </th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap font-medium text-neutral-900">
+                          Net Metal (g)
+                        </th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap">
+                          Labour Earned
+                        </th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap text-emerald-700">
+                          Labour Paid
+                        </th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap font-medium text-neutral-900">
+                          Net Labour Due
+                        </th>
+                        <th className="py-2.5 px-3 text-center whitespace-nowrap">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#f1f5f9]">
+                      {filteredEntries.map((row) => (
+                        <tr key={row.id} className="hover:bg-[#f8fafc] transition-colors">
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap font-mono text-neutral-600">
+                            {row.entry_date}
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap font-mono">
+                            <span className="font-medium text-neutral-800">{row.voucher_no}</span>
+                            {row.reference_job_order && (
+                              <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-100 block mt-0.5">
+                                {row.reference_job_order}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb]">
+                            <div className="font-medium text-neutral-800">{row.particulars}</div>
+                            {row.payment_mode && (
+                              <span className="text-[10px] font-mono text-blue-600">
+                                Mode: {row.payment_mode}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono whitespace-nowrap bg-amber-50/20">
+                            {Number(row.metal_debit_g) > 0 ? (
+                              <span className="font-medium text-amber-700">
+                                +{Number(row.metal_debit_g).toFixed(3)} g
+                              </span>
+                            ) : (
+                              <span className="text-neutral-300">-</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono whitespace-nowrap bg-emerald-50/20">
+                            {Number(row.metal_credit_g) > 0 ? (
+                              <span className="font-medium text-emerald-700">
+                                -{Number(row.metal_credit_g).toFixed(3)} g
+                              </span>
+                            ) : (
+                              <span className="text-neutral-300">-</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono whitespace-nowrap font-medium text-neutral-900">
+                            {Number(row.net_metal_balance_g || 0).toFixed(3)} g
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono whitespace-nowrap">
+                            {Number(row.labour_earned) > 0 ? (
+                              <span>₹ {Number(row.labour_earned).toLocaleString('en-IN')}</span>
+                            ) : (
+                              <span className="text-neutral-300">-</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono whitespace-nowrap text-emerald-700">
+                            {Number(row.labour_paid) > 0 ? (
+                              <span>₹ {Number(row.labour_paid).toLocaleString('en-IN')}</span>
+                            ) : (
+                              <span className="text-neutral-300">-</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono whitespace-nowrap font-medium text-neutral-900">
+                            ₹ {Number(row.net_labour_due || 0).toLocaleString('en-IN')}
+                          </td>
+                          <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                            <button
+                              onClick={() => handleDeleteEntry(row.id)}
+                              disabled={deletingId === row.id}
+                              className="p-1 hover:bg-red-50 rounded text-neutral-400 hover:text-red-600 transition-colors cursor-pointer"
+                              title="Delete voucher"
+                            >
+                              {deletingId === row.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
+                              ) : (
+                                <Trash2 className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           /* Schema Definition Tab */
@@ -614,6 +864,17 @@ export function OrdersGoldsmithLedgerView() {
                 </div>
               </div>
 
+              <div>
+                <label className="text-xs font-medium text-neutral-700 mb-1 block">Reference Job Order (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. JO-2026-208"
+                  value={settleRefJob}
+                  onChange={(e) => setSettleRefJob(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono transition-colors"
+                />
+              </div>
+
               {(settlementType === 'LABOUR_PAYMENT' || settlementType === 'COMBINED') && (
                 <div>
                   <label className="text-xs font-medium text-neutral-700 mb-1 block">Labour Amount to Pay (₹)</label>
@@ -663,9 +924,10 @@ export function OrdersGoldsmithLedgerView() {
               <button
                 type="submit"
                 form="settlement-form"
+                disabled={saving}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-2xs cursor-pointer"
               >
-                <Check className="w-3.5 h-3.5" />
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                 <span>Post Settlement to Ledger</span>
               </button>
             </div>

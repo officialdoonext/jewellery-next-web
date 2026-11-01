@@ -1,8 +1,18 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
+import { FinanceNavigationHeader } from './FinanceNavigationHeader';
+import { db } from '@/lib/firebase';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  deleteDoc,
+  doc,
+  serverTimestamp,
+} from 'firebase/firestore';
 import {
   Wallet,
   Coins,
@@ -14,16 +24,16 @@ import {
   Copy,
   Check,
   X,
-  ShieldCheck,
   Building2,
-  Sparkles,
   Lock,
-  FileText,
-  BadgeIndianRupee,
   RotateCcw,
+  Loader2,
+  Trash2,
+  Plus,
+  ShieldCheck,
 } from 'lucide-react';
 
-interface CashBookEntry {
+export interface CashBookEntry {
   id: string;
   entry_time: string;
   type: 'INFLOW' | 'OUTFLOW' | 'VAULT_TRANSFER';
@@ -32,113 +42,33 @@ interface CashBookEntry {
   drawer_balance: number;
   cashier_name: string;
   reference_no: string;
+  category?: string;
+  created_at?: any;
 }
 
-const INITIAL_ENTRIES: CashBookEntry[] = [
-  {
-    id: '77889900-e5f6-a1b2-c3d4-001122334455',
-    entry_time: '2026-10-31 16:45',
-    type: 'INFLOW',
-    particulars: 'POS Bill #POS-2026-1042 (Diamond Bridal Choker balance)',
-    amount: 145000.0,
-    drawer_balance: 976500.0,
-    cashier_name: 'Priya Sharma (Counter 1)',
-    reference_no: 'POS-2026-1042',
-  },
-  {
-    id: '77889900-e5f6-a1b2-c3d4-001122334456',
-    entry_time: '2026-10-31 15:10',
-    type: 'OUTFLOW',
-    particulars: 'Petty Cash - Security Guard Shift Refreshments & Water Cans',
-    amount: 1500.0,
-    drawer_balance: 831500.0,
-    cashier_name: 'Ramesh Patel (Head Cashier)',
-    reference_no: 'PCV-2026-031',
-  },
-  {
-    id: '77889900-e5f6-a1b2-c3d4-001122334457',
-    entry_time: '2026-10-31 14:05',
-    type: 'INFLOW',
-    particulars: 'Customer Advance Deposit - 22K Gold Temple Necklace #ADV-491',
-    amount: 250000.0,
-    drawer_balance: 833000.0,
-    cashier_name: 'Priya Sharma (Counter 1)',
-    reference_no: 'ADV-491',
-  },
-  {
-    id: '77889900-e5f6-a1b2-c3d4-001122334458',
-    entry_time: '2026-10-31 12:30',
-    type: 'VAULT_TRANSFER',
-    particulars: 'Mid-Day Vault Drop - Transfer excess cash to Main Fireproof Safe',
-    amount: 500000.0,
-    drawer_balance: 583000.0,
-    cashier_name: 'Suresh Verma (Vault Custodian)',
-    reference_no: 'VLT-TRF-084',
-  },
-  {
-    id: '77889900-e5f6-a1b2-c3d4-001122334459',
-    entry_time: '2026-10-31 11:20',
-    type: 'INFLOW',
-    particulars: 'POS Bill #POS-2026-1038 (24K Gold Minted Bars 20g)',
-    amount: 172000.0,
-    drawer_balance: 1083000.0,
-    cashier_name: 'Anjali Nair (Counter 2)',
-    reference_no: 'POS-2026-1038',
-  },
-  {
-    id: '77889900-e5f6-a1b2-c3d4-001122334460',
-    entry_time: '2026-10-31 10:15',
-    type: 'INFLOW',
-    particulars: 'POS Bill #POS-2026-1031 (Silver Puja Thali Set & Diya)',
-    amount: 278000.0,
-    drawer_balance: 911000.0,
-    cashier_name: 'Priya Sharma (Counter 1)',
-    reference_no: 'POS-2026-1031',
-  },
-  {
-    id: '77889900-e5f6-a1b2-c3d4-001122334461',
-    entry_time: '2026-10-31 09:30',
-    type: 'OUTFLOW',
-    particulars: 'Petty Cash - Courier delivery fee for hallmarking certificates',
-    amount: 2000.0,
-    drawer_balance: 633000.0,
-    cashier_name: 'Ramesh Patel (Head Cashier)',
-    reference_no: 'PCV-2026-030',
-  },
-  {
-    id: '77889900-e5f6-a1b2-c3d4-001122334462',
-    entry_time: '2026-10-31 09:00',
-    type: 'INFLOW',
-    particulars: 'Day Opening Cash Float from Safe Vault #01',
-    amount: 150000.0,
-    drawer_balance: 150000.0,
-    cashier_name: 'Ramesh Patel (Head Cashier)',
-    reference_no: 'OPN-FLOAT-20261031',
-  },
-];
-
 export function FinanceCashBookView() {
-  const [entries, setEntries] = useState<CashBookEntry[]>(INITIAL_ENTRIES);
-  const [activeTab, setActiveTab] = useState<'data' | 'definition'>('data');
+  const [entries, setEntries] = useState<CashBookEntry[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Denominations count state (matching ₹9,76,500 Net Drawer Balance)
-  const [notes500, setNotes500] = useState<number>(1850); // 9,25,000
-  const [notes200, setNotes200] = useState<number>(200);  // 40,000
-  const [notes100, setNotes100] = useState<number>(90);   // 9,000
-  const [notes50, setNotes50] = useState<number>(40);     // 2,000
-  const [notes20, setNotes20] = useState<number>(20);     // 400
-  const [notes10, setNotes10] = useState<number>(10);     // 100
-  // 925000 + 40000 + 9000 + 2000 + 400 + 100 = 9,76,500
+  // Denominations count state
+  const [notes500, setNotes500] = useState<number>(0);
+  const [notes200, setNotes200] = useState<number>(0);
+  const [notes100, setNotes100] = useState<number>(0);
+  const [notes50, setNotes50] = useState<number>(0);
+  const [notes20, setNotes20] = useState<number>(0);
+  const [notes10, setNotes10] = useState<number>(0);
 
   // Modals
   const [isVaultDrawerOpen, setIsVaultDrawerOpen] = useState(false);
   const [isNewEntryOpen, setIsNewEntryOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<CashBookEntry | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   // Vault Transfer Form State
-  const [vaultAmount, setVaultAmount] = useState<number>(500000);
+  const [vaultAmount, setVaultAmount] = useState<number>(50000);
   const [vaultCustodian, setVaultCustodian] = useState('Suresh Verma (Vault Custodian)');
   const [vaultRemarks, setVaultRemarks] = useState('End-of-day excess cash deposit into Safe Locker #A2');
 
@@ -147,6 +77,51 @@ export function FinanceCashBookView() {
   const [newParticulars, setNewParticulars] = useState('');
   const [newAmount, setNewAmount] = useState<number>(0);
   const [newRef, setNewRef] = useState('');
+  const [newCashier, setNewCashier] = useState('Priya Sharma (Counter 1)');
+  const [newCategory, setNewCategory] = useState('POS Bill Sale');
+
+  const showToast = (type: 'success' | 'error', text: string) => {
+    setToastMessage({ type, text });
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const fetchEntries = async () => {
+    try {
+      setLoading(true);
+      const snapshot = await getDocs(collection(db, 'finance_cash_book'));
+      const list: CashBookEntry[] = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, ...(d.data() as Omit<CashBookEntry, 'id'>) });
+      });
+      // Sort newest first
+      list.sort((a, b) => (b.entry_time || '').localeCompare(a.entry_time || ''));
+      setEntries(list);
+
+      // Auto-populate denomination demo count if balance exists and notes are 0
+      const bal = list.length > 0 ? list[0].drawer_balance : 0;
+      if (bal > 0 && notes500 === 0 && notes200 === 0) {
+        const count500 = Math.floor(bal / 500);
+        const rem = bal % 500;
+        setNotes500(count500);
+        setNotes100(Math.floor(rem / 100));
+      }
+    } catch (err: any) {
+      console.error('Error fetching cash book:', err);
+      showToast('error', err.message || 'Failed to fetch cash book entries from Firebase');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchEntries();
+  }, []);
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
   const currentBookBalance = entries.length > 0 ? entries[0].drawer_balance : 0;
   const countedTotal =
@@ -158,75 +133,115 @@ export function FinanceCashBookView() {
     notes10 * 10;
   const variance = countedTotal - currentBookBalance;
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
-  };
+  // Dynamic KPI Metrics
+  const totalInflow = entries
+    .filter((e) => e.type === 'INFLOW')
+    .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  const totalOutflow = entries
+    .filter((e) => e.type === 'OUTFLOW' || e.type === 'VAULT_TRANSFER')
+    .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  const openingFloat = entries.length > 0 ? entries[entries.length - 1].amount : 0;
 
-  const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const handleVaultTransfer = (e: React.FormEvent) => {
+  const handleVaultTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (vaultAmount <= 0) return;
+    if (vaultAmount <= 0) {
+      showToast('error', 'Please enter a valid vault handover amount');
+      return;
+    }
     const now = new Date().toISOString().replace('T', ' ').substring(0, 16);
     const newBal = currentBookBalance - Number(vaultAmount);
 
-    const newRecord: CashBookEntry = {
-      id: crypto.randomUUID(),
-      entry_time: now,
-      type: 'VAULT_TRANSFER',
-      particulars: `Safe Vault Handover - ${vaultRemarks}`,
-      amount: Number(vaultAmount),
-      drawer_balance: newBal,
-      cashier_name: vaultCustodian,
-      reference_no: `VLT-TRF-${Math.floor(100 + Math.random() * 900)}`,
-    };
+    try {
+      setSaving(true);
+      const payload: Omit<CashBookEntry, 'id'> = {
+        entry_time: now,
+        type: 'VAULT_TRANSFER',
+        particulars: `Safe Vault Handover - ${vaultRemarks}`,
+        amount: Number(vaultAmount),
+        drawer_balance: newBal,
+        cashier_name: vaultCustodian,
+        reference_no: `VLT-TRF-${Math.floor(100 + Math.random() * 900)}`,
+        category: 'Vault Transfer',
+        created_at: serverTimestamp(),
+      };
 
-    setEntries([newRecord, ...entries]);
-    setIsVaultDrawerOpen(false);
-    showToast(`Transferred ₹ ${vaultAmount.toLocaleString('en-IN')} securely to Safe Vault`);
+      const docRef = await addDoc(collection(db, 'finance_cash_book'), payload);
+      setEntries((prev) => [{ id: docRef.id, ...payload }, ...prev]);
+      setIsVaultDrawerOpen(false);
+      showToast('success', `Transferred ₹ ${vaultAmount.toLocaleString('en-IN')} securely to Safe Vault`);
+    } catch (err: any) {
+      console.error('Error saving vault transfer:', err);
+      showToast('error', err.message || 'Failed to record vault transfer');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleCreateEntry = (e: React.FormEvent) => {
+  const handleCreateEntry = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newAmount <= 0 || !newParticulars) return;
+    if (newAmount <= 0 || !newParticulars.trim()) {
+      showToast('error', 'Please enter particulars and an amount greater than 0');
+      return;
+    }
     const now = new Date().toISOString().replace('T', ' ').substring(0, 16);
     const newBal =
       newType === 'INFLOW'
         ? currentBookBalance + Number(newAmount)
         : currentBookBalance - Number(newAmount);
 
-    const newRecord: CashBookEntry = {
-      id: crypto.randomUUID(),
-      entry_time: now,
-      type: newType,
-      particulars: newParticulars,
-      amount: Number(newAmount),
-      drawer_balance: newBal,
-      cashier_name: 'Ramesh Patel (Head Cashier)',
-      reference_no: newRef || `REF-${Date.now().toString().slice(-4)}`,
-    };
+    try {
+      setSaving(true);
+      const payload: Omit<CashBookEntry, 'id'> = {
+        entry_time: now,
+        type: newType,
+        particulars: newParticulars.trim(),
+        amount: Number(newAmount),
+        drawer_balance: newBal,
+        cashier_name: newCashier,
+        reference_no: newRef.trim() || `REF-${Date.now().toString().slice(-4)}`,
+        category: newCategory,
+        created_at: serverTimestamp(),
+      };
 
-    setEntries([newRecord, ...entries]);
-    setIsNewEntryOpen(false);
-    setNewParticulars('');
-    setNewAmount(0);
-    setNewRef('');
-    showToast(`Recorded ${newType} entry of ₹ ${newAmount.toLocaleString('en-IN')}`);
+      const docRef = await addDoc(collection(db, 'finance_cash_book'), payload);
+      setEntries((prev) => [{ id: docRef.id, ...payload }, ...prev]);
+      setIsNewEntryOpen(false);
+      setNewParticulars('');
+      setNewAmount(0);
+      setNewRef('');
+      showToast('success', `Recorded ${newType} entry of ₹ ${Number(newAmount).toLocaleString('en-IN')}`);
+    } catch (err: any) {
+      console.error('Error saving cash entry:', err);
+      showToast('error', err.message || 'Failed to record cash entry');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteEntry = async () => {
+    if (!itemToDelete) return;
+    try {
+      setSaving(true);
+      await deleteDoc(doc(db, 'finance_cash_book', itemToDelete.id));
+      setEntries((prev) => prev.filter((item) => item.id !== itemToDelete.id));
+      showToast('success', `Deleted cash entry #${itemToDelete.reference_no}`);
+      setItemToDelete(null);
+    } catch (err: any) {
+      console.error('Error deleting entry:', err);
+      showToast('error', err.message || 'Failed to delete entry');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const filteredEntries = entries.filter((item) => {
-    if (!searchQuery) return true;
+    if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
-      item.particulars.toLowerCase().includes(q) ||
-      item.reference_no.toLowerCase().includes(q) ||
-      item.cashier_name.toLowerCase().includes(q) ||
-      item.type.toLowerCase().includes(q)
+      (item.particulars || '').toLowerCase().includes(q) ||
+      (item.reference_no || '').toLowerCase().includes(q) ||
+      (item.cashier_name || '').toLowerCase().includes(q) ||
+      (item.type || '').toLowerCase().includes(q)
     );
   });
 
@@ -237,44 +252,72 @@ export function FinanceCashBookView() {
         filterPlaceholder="Filter by bill #, voucher, cashier, type..."
         insertLabel="New Cash Entry"
         onInsertClick={() => setIsNewEntryOpen(true)}
+        onRefresh={fetchEntries}
       />
 
+      <FinanceNavigationHeader activePage="cash-book" />
+
+      {/* Real-time Toast Banner */}
       {toastMessage && (
-        <div className="fixed top-12 right-6 z-50 bg-neutral-900 text-white text-xs px-4 py-2.5 rounded-lg shadow-lg flex items-center gap-2 border border-neutral-700 animate-in fade-in slide-in-from-top-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          <span>{toastMessage}</span>
+        <div
+          className={`px-4 py-2 text-xs flex items-center justify-between transition-all shrink-0 ${
+            toastMessage.type === 'success'
+              ? 'bg-emerald-50 text-emerald-800 border-b border-emerald-200'
+              : 'bg-red-50 text-red-800 border-b border-red-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {toastMessage.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+            )}
+            <span className="font-medium">{toastMessage.text}</span>
+          </div>
+          <button
+            onClick={() => setToastMessage(null)}
+            className="text-neutral-400 hover:text-neutral-700 p-0.5"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
       <div className="flex-1 overflow-y-auto bg-[#fafafa] flex flex-col custom-scrollbar w-full">
         {/* KPI Metrics Cards */}
-        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white">
+        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white shrink-0">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
               <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Opening Drawer Cash</span>
+                <span className="text-[11px] font-medium uppercase tracking-wider">Opening Float</span>
                 <Wallet className="w-3.5 h-3.5 text-blue-600" />
               </div>
-              <div className="text-xl font-medium text-neutral-900 font-mono">₹ 1,50,000</div>
-              <div className="text-[11px] text-neutral-500 mt-1">Float issued at 09:00 AM</div>
+              <div className="text-xl font-medium text-neutral-900 font-mono">
+                ₹ {openingFloat.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+              <div className="text-[11px] text-neutral-500 mt-1">Starting counter cash</div>
             </div>
 
             <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
               <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Today&apos;s Cash Inflow</span>
+                <span className="text-[11px] font-medium uppercase tracking-wider">Cash Inflows</span>
                 <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600" />
               </div>
-              <div className="text-xl font-medium text-emerald-700 font-mono">₹ 8,45,000</div>
+              <div className="text-xl font-medium text-emerald-700 font-mono">
+                ₹ {totalInflow.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
               <div className="text-[11px] text-emerald-600 mt-1">POS bills & advances</div>
             </div>
 
             <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
               <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Cash Outflow / Petty</span>
+                <span className="text-[11px] font-medium uppercase tracking-wider">Outflows & Vault</span>
                 <ArrowUpRight className="w-3.5 h-3.5 text-amber-600" />
               </div>
-              <div className="text-xl font-medium text-amber-700 font-mono">₹ 18,500</div>
-              <div className="text-[11px] text-neutral-500 mt-1">Store overheads & couriers</div>
+              <div className="text-xl font-medium text-amber-700 font-mono">
+                ₹ {totalOutflow.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+              <div className="text-[11px] text-neutral-500 mt-1">Petty cash & vault drops</div>
             </div>
 
             <div className="p-3.5 rounded-lg bg-emerald-50/50 border border-emerald-200 hover:border-emerald-300 transition-colors shadow-2xs">
@@ -294,7 +337,7 @@ export function FinanceCashBookView() {
         </div>
 
         {/* Interactive Denomination Counter Drawer & Vault Handover Card */}
-        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white">
+        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white shrink-0">
           <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] shadow-2xs flex flex-col lg:flex-row gap-5 items-start lg:items-center justify-between">
             {/* Left: Denomination counting inputs */}
             <div className="flex-1 w-full">
@@ -307,303 +350,194 @@ export function FinanceCashBookView() {
                 </div>
                 <button
                   onClick={() => {
-                    setNotes500(1850);
-                    setNotes200(200);
-                    setNotes100(90);
-                    setNotes50(40);
-                    setNotes20(20);
-                    setNotes10(10);
+                    setNotes500(0);
+                    setNotes200(0);
+                    setNotes100(0);
+                    setNotes50(0);
+                    setNotes20(0);
+                    setNotes10(0);
                   }}
                   className="text-[11px] font-medium text-neutral-500 hover:text-neutral-800 flex items-center gap-1 cursor-pointer"
-                  title="Reset to calculated total"
+                  title="Reset counter inputs"
                 >
                   <RotateCcw className="w-3 h-3" /> Reset
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 font-mono text-xs">
-                <div className="bg-white p-2 rounded border border-[#e2e8f0]">
-                  <label className="text-[10px] text-neutral-500 block mb-1">₹500 Notes</label>
-                  <div className="flex items-center gap-1">
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                {[
+                  { label: '₹ 500', val: notes500, setVal: setNotes500 },
+                  { label: '₹ 200', val: notes200, setVal: setNotes200 },
+                  { label: '₹ 100', val: notes100, setVal: setNotes100 },
+                  { label: '₹ 50', val: notes50, setVal: setNotes50 },
+                  { label: '₹ 20', val: notes20, setVal: setNotes20 },
+                  { label: '₹ 10', val: notes10, setVal: setNotes10 },
+                ].map((item) => (
+                  <div key={item.label} className="bg-white border border-[#e2e8f0] rounded p-2 text-center">
+                    <span className="text-[10px] text-neutral-500 font-mono block mb-1">{item.label}</span>
                     <input
                       type="number"
-                      min={0}
-                      value={notes500}
-                      onChange={(e) => setNotes500(Math.max(0, parseInt(e.target.value) || 0))}
-                      className="w-full px-1.5 py-1 text-xs border border-neutral-200 rounded text-neutral-900 bg-neutral-50 focus:bg-white focus:outline-none"
+                      min="0"
+                      value={item.val || ''}
+                      onChange={(e) => item.setVal(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                      placeholder="0"
+                      className="w-full text-center font-mono text-xs font-medium py-1 px-0.5 border border-[#e2e8f0] rounded focus:border-emerald-500 focus:outline-none"
                     />
+                    <span className="text-[10px] text-neutral-400 font-mono block mt-1">
+                      ₹ {(item.val * parseInt(item.label.replace(/\D/g, ''), 10)).toLocaleString('en-IN')}
+                    </span>
                   </div>
-                  <span className="text-[10px] text-neutral-500 block mt-1 text-right">
-                    ₹ {(notes500 * 500).toLocaleString('en-IN')}
-                  </span>
-                </div>
-
-                <div className="bg-white p-2 rounded border border-[#e2e8f0]">
-                  <label className="text-[10px] text-neutral-500 block mb-1">₹200 Notes</label>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      min={0}
-                      value={notes200}
-                      onChange={(e) => setNotes200(Math.max(0, parseInt(e.target.value) || 0))}
-                      className="w-full px-1.5 py-1 text-xs border border-neutral-200 rounded text-neutral-900 bg-neutral-50 focus:bg-white focus:outline-none"
-                    />
-                  </div>
-                  <span className="text-[10px] text-neutral-500 block mt-1 text-right">
-                    ₹ {(notes200 * 200).toLocaleString('en-IN')}
-                  </span>
-                </div>
-
-                <div className="bg-white p-2 rounded border border-[#e2e8f0]">
-                  <label className="text-[10px] text-neutral-500 block mb-1">₹100 Notes</label>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      min={0}
-                      value={notes100}
-                      onChange={(e) => setNotes100(Math.max(0, parseInt(e.target.value) || 0))}
-                      className="w-full px-1.5 py-1 text-xs border border-neutral-200 rounded text-neutral-900 bg-neutral-50 focus:bg-white focus:outline-none"
-                    />
-                  </div>
-                  <span className="text-[10px] text-neutral-500 block mt-1 text-right">
-                    ₹ {(notes100 * 100).toLocaleString('en-IN')}
-                  </span>
-                </div>
-
-                <div className="bg-white p-2 rounded border border-[#e2e8f0]">
-                  <label className="text-[10px] text-neutral-500 block mb-1">₹50 Notes</label>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      min={0}
-                      value={notes50}
-                      onChange={(e) => setNotes50(Math.max(0, parseInt(e.target.value) || 0))}
-                      className="w-full px-1.5 py-1 text-xs border border-neutral-200 rounded text-neutral-900 bg-neutral-50 focus:bg-white focus:outline-none"
-                    />
-                  </div>
-                  <span className="text-[10px] text-neutral-500 block mt-1 text-right">
-                    ₹ {(notes50 * 50).toLocaleString('en-IN')}
-                  </span>
-                </div>
-
-                <div className="bg-white p-2 rounded border border-[#e2e8f0]">
-                  <label className="text-[10px] text-neutral-500 block mb-1">₹20 Notes</label>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      min={0}
-                      value={notes20}
-                      onChange={(e) => setNotes20(Math.max(0, parseInt(e.target.value) || 0))}
-                      className="w-full px-1.5 py-1 text-xs border border-neutral-200 rounded text-neutral-900 bg-neutral-50 focus:bg-white focus:outline-none"
-                    />
-                  </div>
-                  <span className="text-[10px] text-neutral-500 block mt-1 text-right">
-                    ₹ {(notes20 * 20).toLocaleString('en-IN')}
-                  </span>
-                </div>
-
-                <div className="bg-white p-2 rounded border border-[#e2e8f0]">
-                  <label className="text-[10px] text-neutral-500 block mb-1">₹10 Coins/Notes</label>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      min={0}
-                      value={notes10}
-                      onChange={(e) => setNotes10(Math.max(0, parseInt(e.target.value) || 0))}
-                      className="w-full px-1.5 py-1 text-xs border border-neutral-200 rounded text-neutral-900 bg-neutral-50 focus:bg-white focus:outline-none"
-                    />
-                  </div>
-                  <span className="text-[10px] text-neutral-500 block mt-1 text-right">
-                    ₹ {(notes10 * 10).toLocaleString('en-IN')}
-                  </span>
-                </div>
+                ))}
               </div>
             </div>
 
-            {/* Right: Variance Indicator & Vault Drop Button */}
-            <div className="w-full lg:w-72 bg-white p-3.5 rounded-lg border border-[#e2e8f0] flex flex-col justify-between shrink-0 font-mono">
-              <div className="flex items-center justify-between text-xs mb-1">
-                <span className="text-neutral-500">Physical Counted:</span>
-                <span className="font-medium text-neutral-900">₹ {countedTotal.toLocaleString('en-IN')}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs mb-2">
-                <span className="text-neutral-500">Book Balance:</span>
-                <span className="font-medium text-neutral-900">₹ {currentBookBalance.toLocaleString('en-IN')}</span>
+            {/* Right: Variance & Vault Drop Button */}
+            <div className="lg:w-80 w-full flex flex-col justify-between border-t lg:border-t-0 lg:border-l border-[#e2e8f0] pt-4 lg:pt-0 lg:pl-5 gap-3">
+              <div>
+                <div className="text-[11px] text-neutral-500 uppercase font-medium">Physical Cash Counted</div>
+                <div className="text-xl font-medium text-neutral-900 font-mono">
+                  ₹ {countedTotal.toLocaleString('en-IN')}
+                </div>
               </div>
 
               <div
-                className={`p-2 rounded text-xs mb-3 flex items-center justify-between ${
+                className={`p-2.5 rounded border text-xs flex items-center justify-between ${
                   variance === 0
-                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                    : 'bg-red-50 text-red-800 border border-red-200'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-amber-50 border-amber-200 text-amber-800'
                 }`}
               >
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 font-medium">
                   {variance === 0 ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                   ) : (
-                    <AlertCircle className="w-4 h-4 text-red-600" />
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                   )}
-                  <span className="font-medium">
-                    {variance === 0 ? '₹ 0.00 Variance' : `₹ ${variance.toLocaleString('en-IN')} Variance`}
-                  </span>
+                  <span>{variance === 0 ? 'Physical matches Drawer Book' : 'Discrepancy / Variance'}</span>
                 </div>
-                <span className="text-[10px] uppercase font-sans">
-                  {variance === 0 ? 'Perfect Tally' : 'Mismatch'}
+                <span className="font-mono font-medium">
+                  {variance >= 0 ? `+ ₹ ${variance.toLocaleString('en-IN')}` : `- ₹ ${Math.abs(variance).toLocaleString('en-IN')}`}
                 </span>
               </div>
 
               <button
                 onClick={() => setIsVaultDrawerOpen(true)}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium bg-neutral-900 text-white hover:bg-neutral-800 transition-colors shadow-2xs cursor-pointer w-full"
+                className="w-full py-2 px-3 rounded bg-neutral-900 hover:bg-neutral-800 text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
               >
                 <Lock className="w-3.5 h-3.5 text-amber-400" />
-                Handover Cash to Safe Vault
+                <span>Handover to Safe Vault</span>
               </button>
             </div>
           </div>
         </div>
 
-        {/* Supabase-style Table */}
+        {/* Entries Table or Empty State */}
         <div className="p-4 sm:p-5 flex-1 flex flex-col">
-          <div className="bg-white border border-[#e5e7eb] rounded-lg shadow-2xs overflow-hidden flex flex-col flex-1">
-            <div className="px-4 py-2.5 border-b border-[#e5e7eb] bg-[#f8fafc] flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <Wallet className="w-4 h-4 text-emerald-600" />
-                <span className="font-mono font-medium text-neutral-800">
-                  public.counter_cash_book
-                </span>
-                <span className="text-neutral-400">•</span>
-                <span className="text-neutral-500">
-                  Showing {filteredEntries.length} drawer audit logs
-                </span>
-              </div>
-
-              <div className="flex items-center bg-neutral-200/60 p-0.5 rounded border border-neutral-300/60 text-[13px]">
-                <button
-                  onClick={() => setActiveTab('data')}
-                  className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
-                    activeTab === 'data'
-                      ? 'bg-white text-neutral-900 shadow-2xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  Data
-                </button>
-                <button
-                  onClick={() => setActiveTab('definition')}
-                  className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
-                    activeTab === 'definition'
-                      ? 'bg-white text-neutral-900 shadow-2xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  Definition
-                </button>
-              </div>
+          {loading ? (
+            <div className="py-20 flex flex-col items-center justify-center text-neutral-500">
+              <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mb-3" />
+              <p className="text-xs font-medium">Loading live cash book transactions...</p>
             </div>
-
-            {activeTab === 'data' && (
-              <div className="flex-1 overflow-x-auto custom-scrollbar w-full">
+          ) : filteredEntries.length === 0 ? (
+            <div className="py-16 flex flex-col items-center justify-center text-center p-8 bg-white rounded-lg border border-[#e5e7eb] shadow-2xs">
+              <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 mb-3">
+                <Wallet className="w-6 h-6" />
+              </div>
+              <h3 className="text-sm font-medium text-neutral-900 mb-1">No Cash Book Entries Found</h3>
+              <p className="text-xs text-neutral-500 max-w-sm mb-4">
+                {searchQuery
+                  ? 'No entries match your search query. Try clearing the filter.'
+                  : 'Start recording counter cash inflows, customer advances, petty cash vouchers, and safe vault transfers.'}
+              </p>
+              <button
+                onClick={() => setIsNewEntryOpen(true)}
+                className="px-3.5 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add First Cash Entry</span>
+              </button>
+            </div>
+          ) : (
+            <div className="border border-[#e5e7eb] rounded-lg bg-white overflow-hidden shadow-2xs">
+              <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="bg-[#fcfcfc] border-b border-[#e5e7eb] text-neutral-600 font-mono text-[11px]">
-                      <th className="w-10 px-3 py-2 border-r border-[#e5e7eb] text-center">
-                        <input
-                          type="checkbox"
-                          className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                        />
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">entry_time</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">type</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">particulars</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">reference_no</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <span className="text-neutral-800">amount (₹)</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <span className="text-neutral-800">running_drawer_balance (₹)</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">authorized_by</span>
-                      </th>
-                      <th className="w-16 px-3 py-2 text-center font-medium">uuid</th>
+                    <tr className="bg-[#f8fafc] border-b border-[#e2e8f0] text-neutral-500 uppercase tracking-wider text-[11px]">
+                      <th className="py-2.5 px-3 font-medium">Date & Time</th>
+                      <th className="py-2.5 px-3 font-medium">Type</th>
+                      <th className="py-2.5 px-3 font-medium">Particulars</th>
+                      <th className="py-2.5 px-3 font-medium">Ref / Voucher</th>
+                      <th className="py-2.5 px-3 font-medium">Cashier</th>
+                      <th className="py-2.5 px-3 font-medium text-right">Amount (₹)</th>
+                      <th className="py-2.5 px-3 font-medium text-right">Drawer Bal (₹)</th>
+                      <th className="py-2.5 px-3 font-medium text-center">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#e5e7eb] text-neutral-800 font-mono">
+                  <tbody className="divide-y divide-[#e2e8f0] text-neutral-700">
                     {filteredEntries.map((row) => (
-                      <tr key={row.id} className="hover:bg-neutral-50/80 transition-colors">
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] text-center">
-                          <input
-                            type="checkbox"
-                            className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                          />
-                        </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-600">
+                      <tr key={row.id} className="hover:bg-neutral-50/70 transition-colors">
+                        <td className="py-2 px-3 font-mono text-[11px] text-neutral-500 whitespace-nowrap">
                           {row.entry_time}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap">
+                        <td className="py-2 px-3 whitespace-nowrap">
                           {row.type === 'INFLOW' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              <ArrowDownLeft className="w-3 h-3 text-emerald-600" /> INFLOW
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <ArrowDownLeft className="w-3 h-3 text-emerald-600" />
+                              INFLOW
                             </span>
                           )}
                           {row.type === 'OUTFLOW' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-red-50 text-red-700 border border-red-200">
-                              <ArrowUpRight className="w-3 h-3 text-red-600" /> OUTFLOW
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                              <ArrowUpRight className="w-3 h-3 text-amber-600" />
+                              OUTFLOW
                             </span>
                           )}
                           {row.type === 'VAULT_TRANSFER' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-amber-50 text-amber-800 border border-amber-200">
-                              <Lock className="w-3 h-3 text-amber-600" /> VAULT DROP
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                              <ArrowRightLeft className="w-3 h-3 text-blue-600" />
+                              VAULT DROP
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] font-sans text-neutral-900 max-w-sm truncate">
+                        <td className="py-2 px-3 max-w-xs truncate font-medium text-neutral-900" title={row.particulars}>
                           {row.particulars}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-700">
-                          {row.reference_no}
-                        </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-right">
-                          <span
-                            className={
-                              row.type === 'INFLOW'
-                                ? 'text-emerald-700 font-medium'
-                                : row.type === 'OUTFLOW'
-                                ? 'text-red-700 font-medium'
-                                : 'text-amber-800 font-medium'
-                            }
+                        <td className="py-2 px-3 font-mono text-[11px] text-neutral-600 whitespace-nowrap">
+                          <button
+                            onClick={() => copyToClipboard(row.reference_no, row.id)}
+                            className="inline-flex items-center gap-1 hover:text-emerald-700 cursor-pointer"
+                            title="Copy Ref #"
                           >
-                            {row.type === 'INFLOW' ? '+' : '-'} ₹{' '}
-                            {row.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </span>
+                            <span>{row.reference_no}</span>
+                            {copiedId === row.id ? (
+                              <Check className="w-3 h-3 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-2.5 h-2.5 text-neutral-400 opacity-60" />
+                            )}
+                          </button>
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-right text-neutral-900">
+                        <td className="py-2 px-3 text-neutral-600 whitespace-nowrap">{row.cashier_name}</td>
+                        <td
+                          className={`py-2 px-3 font-mono font-medium text-right whitespace-nowrap ${
+                            row.type === 'INFLOW'
+                              ? 'text-emerald-700'
+                              : row.type === 'OUTFLOW'
+                              ? 'text-amber-700'
+                              : 'text-blue-700'
+                          }`}
+                        >
+                          {row.type === 'INFLOW' ? '+' : '-'} ₹ {row.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2 px-3 font-mono text-neutral-900 text-right whitespace-nowrap font-medium">
                           ₹ {row.drawer_balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap font-sans text-neutral-600">
-                          {row.cashier_name}
-                        </td>
-                        <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                        <td className="py-2 px-3 text-center whitespace-nowrap">
                           <button
-                            onClick={() => copyToClipboard(row.id, row.id)}
-                            className="p-1 text-neutral-400 hover:text-neutral-700 transition-colors"
-                            title="Copy UUID"
+                            onClick={() => setItemToDelete(row)}
+                            className="p-1 rounded text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                            title="Delete entry"
                           >
-                            {copiedId === row.id ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-600" />
-                            ) : (
-                              <Copy className="w-3.5 h-3.5" />
-                            )}
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </td>
                       </tr>
@@ -611,251 +545,296 @@ export function FinanceCashBookView() {
                   </tbody>
                 </table>
               </div>
-            )}
-
-            {activeTab === 'definition' && (
-              <div className="p-4 bg-[#0a0a0a] text-neutral-200 font-mono text-xs overflow-x-auto">
-                <div className="leading-relaxed">
-                  <span className="text-emerald-400">CREATE TABLE</span> public.counter_cash_book (
-                  <br />
-                  &nbsp;&nbsp;id <span className="text-purple-400">UUID</span>{' '}
-                  <span className="text-neutral-400">PRIMARY KEY DEFAULT gen_random_uuid()</span>,
-                  <br />
-                  &nbsp;&nbsp;entry_time <span className="text-purple-400">TIMESTAMPTZ</span>{' '}
-                  <span className="text-neutral-400">DEFAULT NOW()</span>,
-                  <br />
-                  &nbsp;&nbsp;type <span className="text-purple-400">VARCHAR(20)</span>{' '}
-                  <span className="text-neutral-400">CHECK (type IN (&apos;INFLOW&apos;, &apos;OUTFLOW&apos;, &apos;VAULT_TRANSFER&apos;))</span>,
-                  <br />
-                  &nbsp;&nbsp;particulars <span className="text-purple-400">TEXT</span>{' '}
-                  <span className="text-neutral-400">NOT NULL</span>,
-                  <br />
-                  &nbsp;&nbsp;reference_no <span className="text-purple-400">VARCHAR(50)</span>,
-                  <br />
-                  &nbsp;&nbsp;amount <span className="text-purple-400">NUMERIC(12,2)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL</span>,
-                  <br />
-                  &nbsp;&nbsp;drawer_balance <span className="text-purple-400">NUMERIC(12,2)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL</span>,
-                  <br />
-                  &nbsp;&nbsp;authorized_by <span className="text-purple-400">VARCHAR(100)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL</span>
-                  <br />
-                  );
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Drawer: Handover Cash to Safe Vault */}
-      {isVaultDrawerOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-2xs transition-all">
-          <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col justify-between overflow-y-auto">
-            <div>
-              <div className="px-5 py-4 border-b border-[#e5e7eb] flex items-center justify-between bg-[#f8fafc]">
-                <div className="flex items-center gap-2">
-                  <Lock className="w-4 h-4 text-amber-500" />
-                  <h3 className="text-sm font-medium text-neutral-900">
-                    Safe Vault Cash Handover
-                  </h3>
+      {/* MODAL: New Cash Entry */}
+      {isNewEntryOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="p-4 bg-[#f8fafc] border-b border-[#e2e8f0] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Wallet className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-xs font-medium text-neutral-900 uppercase tracking-wider">
+                  Record Counter Cash Entry
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsNewEntryOpen(false)}
+                className="text-neutral-400 hover:text-neutral-700 p-1 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateEntry} className="p-5 space-y-4 text-xs">
+              <div>
+                <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                  Cash Flow Direction
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewType('INFLOW')}
+                    className={`py-2 px-3 rounded border text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                      newType === 'INFLOW'
+                        ? 'bg-emerald-50 border-emerald-500 text-emerald-800'
+                        : 'border-[#e2e8f0] text-neutral-600 hover:bg-neutral-50'
+                    }`}
+                  >
+                    <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Inflow (Receipt)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewType('OUTFLOW')}
+                    className={`py-2 px-3 rounded border text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                      newType === 'OUTFLOW'
+                        ? 'bg-amber-50 border-amber-500 text-amber-800'
+                        : 'border-[#e2e8f0] text-neutral-600 hover:bg-neutral-50'
+                    }`}
+                  >
+                    <ArrowUpRight className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Outflow (Petty)</span>
+                  </button>
                 </div>
-                <button
-                  onClick={() => setIsVaultDrawerOpen(false)}
-                  className="p-1 hover:bg-neutral-200/60 rounded text-neutral-400 hover:text-neutral-700"
-                >
-                  <X className="w-4 h-4" />
-                </button>
               </div>
 
-              <form onSubmit={handleVaultTransfer} className="p-5 space-y-4">
+              <div>
+                <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                  Particulars / Description *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. POS Bill #1042 / Refreshment expense / Gold Scrap float"
+                  value={newParticulars}
+                  onChange={(e) => setNewParticulars(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Vault Transfer Amount (₹)
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Amount (₹) *
                   </label>
                   <input
                     type="number"
-                    min={1}
-                    max={currentBookBalance}
-                    value={vaultAmount}
-                    onChange={(e) => setVaultAmount(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
+                    min="1"
                     required
+                    value={newAmount || ''}
+                    onChange={(e) => setNewAmount(parseFloat(e.target.value) || 0)}
+                    placeholder="0.00"
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded font-mono font-medium focus:border-emerald-500 focus:bg-white focus:outline-none"
                   />
-                  <span className="text-[11px] text-neutral-500 mt-1 block">
-                    Maximum available in drawer: ₹ {currentBookBalance.toLocaleString('en-IN')}
-                  </span>
                 </div>
-
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Chief Vault Custodian / Receiving Officer
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Ref / Bill / Voucher #
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="POS-2026-XXXX"
+                    value={newRef}
+                    onChange={(e) => setNewRef(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded font-mono focus:border-emerald-500 focus:bg-white focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Cashier / Counter
                   </label>
                   <select
-                    value={vaultCustodian}
-                    onChange={(e) => setVaultCustodian(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
+                    value={newCashier}
+                    onChange={(e) => setNewCashier(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
                   >
-                    <option value="Suresh Verma (Vault Custodian)">Suresh Verma (Chief Vault Custodian - Safe A)</option>
-                    <option value="Rajesh Gupta (Store General Manager)">Rajesh Gupta (Store General Manager)</option>
-                    <option value="Mohan Rao (Head Auditor)">Mohan Rao (Head Auditor)</option>
+                    <option value="Priya Sharma (Counter 1)">Priya Sharma (Counter 1)</option>
+                    <option value="Anjali Nair (Counter 2)">Anjali Nair (Counter 2)</option>
+                    <option value="Ramesh Patel (Head Cashier)">Ramesh Patel (Head Cashier)</option>
+                    <option value="Suresh Verma (Vault Custodian)">Suresh Verma (Vault Custodian)</option>
                   </select>
                 </div>
-
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Handover Narration / Safe Compartment
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Category
                   </label>
-                  <textarea
-                    rows={3}
-                    value={vaultRemarks}
-                    onChange={(e) => setVaultRemarks(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
-                    placeholder="e.g. End-of-day excess cash deposit into Safe Locker #A2"
-                  />
-                </div>
-
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-[11px] text-amber-800 flex items-start gap-2">
-                  <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  <span>
-                    Transfers automatically decrement counter drawer float and generate dual-signed vault receipt log for audit compliance.
-                  </span>
-                </div>
-
-                <div className="pt-2 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsVaultDrawerOpen(false)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 transition-colors cursor-pointer"
+                  <select
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-2xs cursor-pointer"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    Confirm Vault Handover
-                  </button>
+                    <option value="POS Bill Sale">POS Bill Sale</option>
+                    <option value="Customer Advance">Customer Advance</option>
+                    <option value="Petty Cash Overhead">Petty Cash Overhead</option>
+                    <option value="Store Refreshments">Store Refreshments</option>
+                    <option value="Security / Courier">Security / Courier</option>
+                  </select>
                 </div>
-              </form>
-            </div>
+              </div>
+
+              {/* Dynamic Preview */}
+              <div className="p-2.5 rounded bg-neutral-50 border border-[#e2e8f0] flex items-center justify-between text-[11px]">
+                <span className="text-neutral-500">Projected Drawer Bal:</span>
+                <span className="font-mono font-medium text-neutral-900">
+                  ₹{' '}
+                  {(newType === 'INFLOW'
+                    ? currentBookBalance + Number(newAmount)
+                    : currentBookBalance - Number(newAmount)
+                  ).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#e2e8f0]">
+                <button
+                  type="button"
+                  onClick={() => setIsNewEntryOpen(false)}
+                  className="px-3 py-1.5 rounded border border-[#e2e8f0] text-neutral-600 hover:bg-neutral-50 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>Save to Cash Book</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* Drawer: Record New Counter Cash Entry */}
-      {isNewEntryOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-2xs transition-all">
-          <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col justify-between overflow-y-auto">
-            <div>
-              <div className="px-5 py-4 border-b border-[#e5e7eb] flex items-center justify-between bg-[#f8fafc]">
-                <div className="flex items-center gap-2">
-                  <BadgeIndianRupee className="w-4 h-4 text-emerald-600" />
-                  <h3 className="text-sm font-medium text-neutral-900">
-                    Record Counter Cash Entry
-                  </h3>
-                </div>
-                <button
-                  onClick={() => setIsNewEntryOpen(false)}
-                  className="p-1 hover:bg-neutral-200/60 rounded text-neutral-400 hover:text-neutral-700"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+      {/* MODAL: Safe Vault Handover */}
+      {isVaultDrawerOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="p-4 bg-[#f8fafc] border-b border-[#e2e8f0] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4 text-amber-500" />
+                <h3 className="text-xs font-medium text-neutral-900 uppercase tracking-wider">
+                  Transfer Cash to Main Safe Vault
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsVaultDrawerOpen(false)}
+                className="text-neutral-400 hover:text-neutral-700 p-1 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleVaultTransfer} className="p-5 space-y-4 text-xs">
+              <div>
+                <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                  Vault Transfer Amount (₹) *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  value={vaultAmount || ''}
+                  onChange={(e) => setVaultAmount(parseFloat(e.target.value) || 0)}
+                  placeholder="0.00"
+                  className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded font-mono font-medium focus:border-emerald-500 focus:bg-white focus:outline-none"
+                />
               </div>
 
-              <form onSubmit={handleCreateEntry} className="p-5 space-y-4">
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Transaction Direction
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setNewType('INFLOW')}
-                      className={`py-2 px-3 text-xs rounded border transition-colors flex items-center justify-center gap-1.5 ${
-                        newType === 'INFLOW'
-                          ? 'bg-emerald-50 border-emerald-300 text-emerald-800 font-medium'
-                          : 'bg-white border-[#e2e8f0] text-neutral-600'
-                      }`}
-                    >
-                      <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600" />
-                      Cash Inflow
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNewType('OUTFLOW')}
-                      className={`py-2 px-3 text-xs rounded border transition-colors flex items-center justify-center gap-1.5 ${
-                        newType === 'OUTFLOW'
-                          ? 'bg-red-50 border-red-300 text-red-800 font-medium'
-                          : 'bg-white border-[#e2e8f0] text-neutral-600'
-                      }`}
-                    >
-                      <ArrowUpRight className="w-3.5 h-3.5 text-red-600" />
-                      Cash Outflow
-                    </button>
-                  </div>
-                </div>
+              <div>
+                <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                  Receiving Vault Custodian *
+                </label>
+                <select
+                  value={vaultCustodian}
+                  onChange={(e) => setVaultCustodian(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
+                >
+                  <option value="Suresh Verma (Vault Custodian)">Suresh Verma (Vault Custodian)</option>
+                  <option value="Rajesh Gupta (General Manager)">Rajesh Gupta (General Manager)</option>
+                  <option value="Central Strongroom Guard #02">Central Strongroom Guard #02</option>
+                </select>
+              </div>
 
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Particulars & Customer / Bill Description
-                  </label>
-                  <input
-                    type="text"
-                    value={newParticulars}
-                    onChange={(e) => setNewParticulars(e.target.value)}
-                    placeholder="e.g. POS Bill #POS-2026-1045 or Tea Vendor Petty Cash"
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
-                    required
-                  />
-                </div>
+              <div>
+                <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                  Vault Remarks / Locker ID
+                </label>
+                <input
+                  type="text"
+                  value={vaultRemarks}
+                  onChange={(e) => setVaultRemarks(e.target.value)}
+                  placeholder="e.g. End-of-day excess cash deposit into Safe Locker #A2"
+                  className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
+                />
+              </div>
 
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Reference Voucher / POS Bill #
-                  </label>
-                  <input
-                    type="text"
-                    value={newRef}
-                    onChange={(e) => setNewRef(e.target.value)}
-                    placeholder="e.g. POS-2026-1045 or PCV-032"
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
-                  />
-                </div>
+              <div className="p-2.5 rounded bg-amber-50 border border-amber-200 text-amber-900 text-[11px] flex items-center justify-between">
+                <span>Remaining in Counter Drawer:</span>
+                <span className="font-mono font-medium">
+                  ₹ {(currentBookBalance - Number(vaultAmount)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
 
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Amount (₹)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={newAmount || ''}
-                    onChange={(e) => setNewAmount(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
-                    required
-                  />
-                </div>
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#e2e8f0]">
+                <button
+                  type="button"
+                  onClick={() => setIsVaultDrawerOpen(false)}
+                  className="px-3 py-1.5 rounded border border-[#e2e8f0] text-neutral-600 hover:bg-neutral-50 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-1.5 rounded bg-neutral-900 hover:bg-neutral-800 text-white font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />}
+                  <span>Confirm Vault Handover</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
-                <div className="pt-2 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsNewEntryOpen(false)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-2xs cursor-pointer"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    Add Cash Record
-                  </button>
-                </div>
-              </form>
+      {/* MODAL: Delete Confirmation */}
+      {itemToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-xl w-full max-w-sm p-5 space-y-3 animate-in fade-in zoom-in-95">
+            <div className="w-10 h-10 rounded-full bg-red-50 border border-red-200 flex items-center justify-center text-red-600 mx-auto">
+              <Trash2 className="w-5 h-5" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-sm font-medium text-neutral-900">Delete Cash Entry?</h3>
+              <p className="text-xs text-neutral-500 mt-1">
+                Are you sure you want to delete entry <span className="font-mono font-medium text-neutral-800">#{itemToDelete.reference_no}</span> (₹ {itemToDelete.amount.toLocaleString('en-IN')})?
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setItemToDelete(null)}
+                className="px-3 py-1.5 rounded border border-[#e2e8f0] text-neutral-600 hover:bg-neutral-50 font-medium text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteEntry}
+                disabled={saving}
+                className="px-4 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white font-medium text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                <span>Delete Entry</span>
+              </button>
             </div>
           </div>
         </div>

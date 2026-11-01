@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
 import {
@@ -21,9 +22,25 @@ import {
   User,
   Phone,
   ArrowRight,
+  Loader2,
+  Trash2,
+  Percent,
+  Gem,
+  Layers,
+  Store,
+  ExternalLink,
 } from 'lucide-react';
+import { db } from '@/lib/firebase';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  deleteDoc,
+  doc,
+  updateDoc,
+} from 'firebase/firestore';
 
-interface OldGoldSlip {
+export interface OldGoldSlip {
   id: string;
   slip_no: string;
   customer_name: string;
@@ -35,152 +52,152 @@ interface OldGoldSlip {
   fine_gold_equivalent_g: number;
   buy_rate_per_g: number;
   final_payable_inr: number;
-  testing_method: 'XRF_SPECTROMETER' | 'TOUCHSTONE_NITRIC' | 'SPECIFIC_GRAVITY';
-  status: 'ACCEPTED_IN_BILL' | 'PENDING_MELT' | 'SETTLED_CASH';
+  testing_method: 'XRF_SPECTROMETER' | 'TOUCHSTONE_NITRIC' | 'SPECIFIC_GRAVITY' | 'FIRE_ASSAY';
+  status: 'ACCEPTED_IN_BILL' | 'PENDING_MELT' | 'SETTLED_CASH' | 'ARCHIVED';
+  melting_loss_pct?: number;
+  valuer_notes?: string;
   created_at: string;
 }
 
-const INITIAL_SLIPS: OldGoldSlip[] = [
-  {
-    id: 'ogv-slip-001',
-    slip_no: 'OGV-2026-081',
-    customer_name: 'Pooja Agarwal',
-    customer_phone: '+91 98490 12891',
-    gross_weight_g: 24.5,
-    deductions_g: 2.1,
-    net_weight_g: 22.4,
-    assessed_purity_pct: 88.5,
-    fine_gold_equivalent_g: 19.525,
-    buy_rate_per_g: 8010.0,
-    final_payable_inr: 156395.0,
-    testing_method: 'XRF_SPECTROMETER',
-    status: 'ACCEPTED_IN_BILL',
-    created_at: '2026-10-31 10:15 AM',
-  },
-  {
-    id: 'ogv-slip-002',
-    slip_no: 'OGV-2026-080',
-    customer_name: 'K. Venkatesh',
-    customer_phone: '+91 94401 55672',
-    gross_weight_g: 52.8,
-    deductions_g: 3.4,
-    net_weight_g: 49.4,
-    assessed_purity_pct: 91.2,
-    fine_gold_equivalent_g: 44.376,
-    buy_rate_per_g: 8010.0,
-    final_payable_inr: 355452.0,
-    testing_method: 'XRF_SPECTROMETER',
-    status: 'ACCEPTED_IN_BILL',
-    created_at: '2026-10-31 09:40 AM',
-  },
-  {
-    id: 'ogv-slip-003',
-    slip_no: 'OGV-2026-079',
-    customer_name: 'Sunita Mehra',
-    customer_phone: '+91 98200 44109',
-    gross_weight_g: 14.2,
-    deductions_g: 1.8,
-    net_weight_g: 12.4,
-    assessed_purity_pct: 75.0,
-    fine_gold_equivalent_g: 9.161,
-    buy_rate_per_g: 8010.0,
-    final_payable_inr: 73380.0,
-    testing_method: 'TOUCHSTONE_NITRIC',
-    status: 'PENDING_MELT',
-    created_at: '2026-10-30 05:20 PM',
-  },
-  {
-    id: 'ogv-slip-004',
-    slip_no: 'OGV-2026-078',
-    customer_name: 'Rajesh Goud',
-    customer_phone: '+91 97011 88320',
-    gross_weight_g: 38.6,
-    deductions_g: 2.2,
-    net_weight_g: 36.4,
-    assessed_purity_pct: 90.0,
-    fine_gold_equivalent_g: 32.27,
-    buy_rate_per_g: 7990.0,
-    final_payable_inr: 257837.0,
-    testing_method: 'SPECIFIC_GRAVITY',
-    status: 'SETTLED_CASH',
-    created_at: '2026-10-30 03:10 PM',
-  },
-  {
-    id: 'ogv-slip-005',
-    slip_no: 'OGV-2026-077',
-    customer_name: 'Deepa Krishnan',
-    customer_phone: '+91 99400 12048',
-    gross_weight_g: 18.9,
-    deductions_g: 1.5,
-    net_weight_g: 17.4,
-    assessed_purity_pct: 87.5,
-    fine_gold_equivalent_g: 14.996,
-    buy_rate_per_g: 7990.0,
-    final_payable_inr: 119818.0,
-    testing_method: 'XRF_SPECTROMETER',
-    status: 'ACCEPTED_IN_BILL',
-    created_at: '2026-10-30 11:30 AM',
-  },
-];
-
 export function RatesOldGoldValuationView() {
   const [activeTab, setActiveTab] = useState<'data' | 'definition'>('data');
-  const [slips, setSlips] = useState<OldGoldSlip[]>(INITIAL_SLIPS);
+  const [slips, setSlips] = useState<OldGoldSlip[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACCEPTED_IN_BILL' | 'PENDING_MELT' | 'SETTLED_CASH'>('ALL');
 
-  // Interactive Calculator State
-  const [calcCustomerName, setCalcCustomerName] = useState('Priya Narayanan');
-  const [calcCustomerPhone, setCalcCustomerPhone] = useState('+91 98840 77123');
-  const [calcGrossWeight, setCalcGrossWeight] = useState('22.400');
-  const [calcWaxDirtDeduction, setCalcWaxDirtDeduction] = useState('0.800');
-  const [calcStonesDeduction, setCalcStonesDeduction] = useState('1.000');
-  const [calcAssessedPurity, setCalcAssessedPurity] = useState('88.50');
-  const [calcTestingMethod, setCalcTestingMethod] = useState<'XRF_SPECTROMETER' | 'TOUCHSTONE_NITRIC' | 'SPECIFIC_GRAVITY'>('XRF_SPECTROMETER');
-  const [calcMeltingLossPct, setCalcMeltingLossPct] = useState('1.5');
-  const [calcBuyRate24k, setCalcBuyRate24k] = useState('8010');
+  // Toast
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'idle'>('idle');
 
-  // Slip modal / receipt preview
-  const [activeSlipPreview, setActiveSlipPreview] = useState<OldGoldSlip | null>(null);
-  const [isGeneratedModalOpen, setIsGeneratedModalOpen] = useState(false);
+  // Modal State: New Slip
+  const [isNewSlipModalOpen, setIsNewSlipModalOpen] = useState(false);
+  const [custName, setCustName] = useState('');
+  const [custPhone, setCustPhone] = useState('');
+  const [grossWt, setGrossWt] = useState('24.500');
+  const [deductionsWt, setDeductionsWt] = useState('2.100');
+  const [purityPct, setPurityPct] = useState('88.5');
+  const [meltingLossPct, setMeltingLossPct] = useState('1.0');
+  const [buyRateG, setBuyRateG] = useState('8010');
+  const [testMethod, setTestMethod] = useState<OldGoldSlip['testing_method']>('XRF_SPECTROMETER');
+  const [settlementStatus, setSettlementStatus] = useState<OldGoldSlip['status']>('ACCEPTED_IN_BILL');
+  const [ornamentNotes, setOrnamentNotes] = useState('Old traditional gold chain and studs');
 
-  // Computations
-  const gross = parseFloat(calcGrossWeight) || 0;
-  const waxDirt = parseFloat(calcWaxDirtDeduction) || 0;
-  const stones = parseFloat(calcStonesDeduction) || 0;
-  const totalDeductions = waxDirt + stones;
-  const netWeight = Math.max(0, gross - totalDeductions);
-  const purityPct = parseFloat(calcAssessedPurity) || 0;
-  const meltingLossFactor = 1 - (parseFloat(calcMeltingLossPct) || 0) / 100;
-  const fineGoldGrams = (netWeight * (purityPct / 100)) * meltingLossFactor;
-  const buyRate = parseFloat(calcBuyRate24k) || 8010;
-  const finalPayable = Math.round(fineGoldGrams * buyRate);
+  // Slip Details / Print Preview Modal
+  const [selectedSlip, setSelectedSlip] = useState<OldGoldSlip | null>(null);
 
-  const handleGenerateSlip = (e: React.FormEvent) => {
+  const showToast = (type: 'success' | 'error', msg: string) => {
+    setToastType(type);
+    setToastMessage(msg);
+    setTimeout(() => setToastType('idle'), 4000);
+  };
+
+  const fetchSlips = async () => {
+    try {
+      setLoading(true);
+      const snapshot = await getDocs(collection(db, 'rates_old_gold_valuation'));
+      const list: OldGoldSlip[] = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, ...(d.data() as Omit<OldGoldSlip, 'id'>) });
+      });
+      list.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+      setSlips(list);
+    } catch (err: any) {
+      console.error('Error fetching old gold slips:', err);
+      showToast('error', err.message || 'Failed to fetch valuation slips');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSlips();
+  }, []);
+
+  // Compute live values for modal
+  const calcGross = parseFloat(grossWt) || 0;
+  const calcDeduct = parseFloat(deductionsWt) || 0;
+  const calcNet = Math.max(0, calcGross - calcDeduct);
+  const calcPurity = parseFloat(purityPct) || 0;
+  const calcLoss = parseFloat(meltingLossPct) || 0;
+  const calcFineEquivalent = calcNet * (calcPurity / 100) * ((100 - calcLoss) / 100);
+  const calcBuyRate = parseFloat(buyRateG) || 8010;
+  const calcPayable = Math.round(calcFineEquivalent * calcBuyRate);
+
+  const handleCreateSlip = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!calcCustomerName || gross <= 0) return;
+    if (!custName.trim()) return;
 
-    const nextSlipNumber = `OGV-2026-0${82 + (slips.length - INITIAL_SLIPS.length)}`;
-    const newSlip: OldGoldSlip = {
-      id: `ogv-${Date.now()}`,
-      slip_no: nextSlipNumber,
-      customer_name: calcCustomerName,
-      customer_phone: calcCustomerPhone,
-      gross_weight_g: gross,
-      deductions_g: totalDeductions,
-      net_weight_g: netWeight,
-      assessed_purity_pct: purityPct,
-      fine_gold_equivalent_g: Math.round(fineGoldGrams * 1000) / 1000,
-      buy_rate_per_g: buyRate,
-      final_payable_inr: finalPayable,
-      testing_method: calcTestingMethod,
-      status: 'ACCEPTED_IN_BILL',
-      created_at: 'Today ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    const dateStr = new Date().toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+    const timeStr = new Date().toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+    const slipNumber = `OGV-${new Date().getFullYear()}-${String(slips.length + 1).padStart(3, '0')}`;
+
+    const newSlip: Omit<OldGoldSlip, 'id'> = {
+      slip_no: slipNumber,
+      customer_name: custName.trim(),
+      customer_phone: custPhone.trim() || '+91 98000 00000',
+      gross_weight_g: calcGross,
+      deductions_g: calcDeduct,
+      net_weight_g: Math.round(calcNet * 1000) / 1000,
+      assessed_purity_pct: calcPurity,
+      melting_loss_pct: calcLoss,
+      fine_gold_equivalent_g: Math.round(calcFineEquivalent * 1000) / 1000,
+      buy_rate_per_g: calcBuyRate,
+      final_payable_inr: calcPayable,
+      testing_method: testMethod,
+      status: settlementStatus,
+      valuer_notes: ornamentNotes.trim(),
+      created_at: `${dateStr} ${timeStr}`,
     };
 
-    setSlips([newSlip, ...slips]);
-    setActiveSlipPreview(newSlip);
-    setIsGeneratedModalOpen(true);
+    try {
+      setSaving(true);
+      const docRef = await addDoc(collection(db, 'rates_old_gold_valuation'), newSlip);
+      setSlips((prev) => [{ id: docRef.id, ...newSlip }, ...prev]);
+      setIsNewSlipModalOpen(false);
+      showToast('success', `Valuation slip ${slipNumber} issued for ₹${calcPayable.toLocaleString('en-IN')}`);
+      setCustName('');
+      setCustPhone('');
+    } catch (err: any) {
+      console.error('Error creating slip:', err);
+      showToast('error', err.message || 'Failed to create valuation slip');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUpdateStatus = async (id: string, newStatus: OldGoldSlip['status']) => {
+    try {
+      await updateDoc(doc(db, 'rates_old_gold_valuation', id), { status: newStatus });
+      setSlips((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, status: newStatus } : s))
+      );
+      showToast('success', `Slip marked as ${newStatus.replace(/_/g, ' ')}`);
+    } catch (err: any) {
+      console.error('Error updating slip status:', err);
+      showToast('error', err.message || 'Failed to update slip status');
+    }
+  };
+
+  const handleDeleteSlip = async (id: string, slipNo: string) => {
+    if (!confirm(`Delete old gold valuation slip "${slipNo}"?`)) return;
+    try {
+      await deleteDoc(doc(db, 'rates_old_gold_valuation', id));
+      setSlips((prev) => prev.filter((s) => s.id !== id));
+      showToast('success', `Slip "${slipNo}" deleted.`);
+    } catch (err: any) {
+      console.error('Error deleting slip:', err);
+      showToast('error', err.message || 'Failed to delete slip');
+    }
   };
 
   const filteredSlips = slips.filter((s) => {
@@ -190,428 +207,374 @@ export function RatesOldGoldValuationView() {
       return (
         s.slip_no.toLowerCase().includes(q) ||
         s.customer_name.toLowerCase().includes(q) ||
-        s.customer_phone.toLowerCase().includes(q)
+        s.customer_phone.toLowerCase().includes(q) ||
+        s.testing_method.toLowerCase().includes(q)
       );
     }
     return true;
   });
 
+  // Totals
+  const totalFinePurchased = slips.reduce((acc, s) => acc + (s.fine_gold_equivalent_g || 0), 0);
+  const totalValuationPayable = slips.reduce((acc, s) => acc + (s.final_payable_inr || 0), 0);
+
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0">
-      <TabBar title="rates_old_gold" />
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0 font-sans">
+      <TabBar title="rates_old_gold_valuation" />
       <ActionToolbar
-        filterPlaceholder="Filter by slip #, customer name, mobile..."
-        insertLabel="New Old Gold Slip"
-        onInsertClick={() => {
-          setCalcGrossWeight('');
-          setCalcWaxDirtDeduction('0.000');
-          setCalcStonesDeduction('0.000');
-        }}
+        filterPlaceholder="Search old gold slips by customer name, slip number, phone..."
+        insertLabel="New Assay Slip"
+        onInsertClick={() => setIsNewSlipModalOpen(true)}
+        onRefresh={fetchSlips}
       />
 
       <div className="flex-1 overflow-y-auto bg-[#fafafa] flex flex-col custom-scrollbar w-full">
-        {/* KPI Metrics Summary Cards */}
-        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            {/* KPI 1 */}
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-amber-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Scrap Received Today</span>
-                <Scale className="w-3.5 h-3.5 text-amber-600" />
-              </div>
-              <div className="text-xl font-medium text-neutral-900">420.500 g</div>
-              <div className="text-[11px] text-amber-600 mt-1 font-mono">
-                14 Assessment Slips
-              </div>
+        <div className="p-4 flex flex-col gap-4 max-w-7xl w-full mx-auto">
+          {/* Toast Notification */}
+          {toastType === 'success' && (
+            <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{toastMessage}</span>
             </div>
-
-            {/* KPI 2 */}
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Net Fine Credit Value</span>
-                <Coins className="w-3.5 h-3.5 text-emerald-600" />
-              </div>
-              <div className="text-xl font-medium text-neutral-900">₹ 29,84,500</div>
-              <div className="text-[11px] text-emerald-600 mt-1 font-mono">
-                Adjusted against new sales
-              </div>
+          )}
+          {toastType === 'error' && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <span>{toastMessage}</span>
             </div>
+          )}
 
-            {/* KPI 3 */}
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-blue-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Avg Assessed Purity</span>
-                <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-              </div>
-              <div className="text-xl font-medium text-neutral-900">88.40%</div>
-              <div className="text-[11px] text-blue-600 mt-1 font-mono">
-                21.2 Karat Weighted Avg
-              </div>
-            </div>
-
-            {/* KPI 4 */}
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-neutral-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Melting Loss Buffer</span>
-                <Flame className="w-3.5 h-3.5 text-rose-500" />
-              </div>
-              <div className="text-xl font-medium text-neutral-900">1.50% Std</div>
-              <div className="text-[11px] text-neutral-500 mt-1 font-mono">
-                Standard refinery burning loss
-              </div>
-            </div>
-
-            {/* KPI 5 */}
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-neutral-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">24K Scrap Benchmark</span>
-                <Coins className="w-3.5 h-3.5 text-neutral-600" />
-              </div>
-              <div className="text-xl font-medium text-neutral-900">₹ 8,010 /g</div>
-              <div className="text-[11px] text-neutral-500 mt-1 font-mono">
-                Sell ₹8,120 - Margin ₹110
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Interactive Old Gold Evaluation Calculator Form & Live Results */}
-        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white">
-          <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] shadow-2xs">
-            <div className="flex items-center justify-between mb-3 border-b border-[#e2e8f0] pb-2.5">
-              <div className="flex items-center gap-2">
-                <Calculator className="w-4 h-4 text-emerald-600" />
-                <span className="text-xs font-medium text-neutral-900 uppercase tracking-wider">
-                  Interactive Old Gold Scrap Assessment Calculator
-                </span>
-              </div>
-              <span className="text-[11px] text-neutral-500 font-mono">
-                BIS Certified Evaluation Workflow
+          {/* Cross-Module Navigation Hub */}
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-white border border-[#e2e8f0] rounded-lg shadow-2xs">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-medium text-neutral-500 uppercase tracking-wider">
+                Rates & Valuation Hub:
               </span>
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <Link
+                  href="/rates/gold-rates"
+                  className="px-2.5 py-1 bg-white border border-neutral-200 text-neutral-600 hover:text-emerald-700 hover:border-emerald-200 rounded-md font-medium text-xs flex items-center gap-1 transition-colors"
+                >
+                  <Coins className="w-3 h-3 text-neutral-400" /> Gold Rates
+                </Link>
+                <Link
+                  href="/rates/silver-rates"
+                  className="px-2.5 py-1 bg-white border border-neutral-200 text-neutral-600 hover:text-emerald-700 hover:border-emerald-200 rounded-md font-medium text-xs flex items-center gap-1 transition-colors"
+                >
+                  <Scale className="w-3 h-3 text-neutral-400" /> Silver Bullion
+                </Link>
+                <Link
+                  href="/rates/making-charges"
+                  className="px-2.5 py-1 bg-white border border-neutral-200 text-neutral-600 hover:text-emerald-700 hover:border-emerald-200 rounded-md font-medium text-xs flex items-center gap-1 transition-colors"
+                >
+                  <Percent className="w-3 h-3 text-neutral-400" /> Making Charges
+                </Link>
+                <Link
+                  href="/rates/wastage-rules"
+                  className="px-2.5 py-1 bg-white border border-neutral-200 text-neutral-600 hover:text-emerald-700 hover:border-emerald-200 rounded-md font-medium text-xs flex items-center gap-1 transition-colors"
+                >
+                  <Layers className="w-3 h-3 text-neutral-400" /> Wastage (VA)
+                </Link>
+                <Link
+                  href="/rates/diamond-valuation"
+                  className="px-2.5 py-1 bg-white border border-neutral-200 text-neutral-600 hover:text-emerald-700 hover:border-emerald-200 rounded-md font-medium text-xs flex items-center gap-1 transition-colors"
+                >
+                  <Gem className="w-3 h-3 text-neutral-400" /> Diamond 4Cs
+                </Link>
+                <Link
+                  href="/rates/old-gold-valuation"
+                  className="px-2.5 py-1 bg-emerald-50 border border-emerald-300 text-emerald-700 rounded-md font-medium text-xs flex items-center gap-1 shadow-2xs"
+                >
+                  <Flame className="w-3 h-3 text-emerald-600" /> Old Gold Assay
+                </Link>
+              </div>
             </div>
 
-            <form onSubmit={handleGenerateSlip}>
-              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Customer Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={calcCustomerName}
-                    onChange={(e) => setCalcCustomerName(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
-                    placeholder="Customer Name"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Mobile Number</label>
-                  <input
-                    type="text"
-                    required
-                    value={calcCustomerPhone}
-                    onChange={(e) => setCalcCustomerPhone(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
-                    placeholder="+91..."
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Gross Weight (g)</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    required
-                    value={calcGrossWeight}
-                    onChange={(e) => setCalcGrossWeight(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
-                    placeholder="0.000"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Lac/Wax/Dirt (g)</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    value={calcWaxDirtDeduction}
-                    onChange={(e) => setCalcWaxDirtDeduction(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
-                    placeholder="0.000"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Stones/Enamel (g)</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    value={calcStonesDeduction}
-                    onChange={(e) => setCalcStonesDeduction(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
-                    placeholder="0.000"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Assessed Purity (%)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    required
-                    value={calcAssessedPurity}
-                    onChange={(e) => setCalcAssessedPurity(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
-                    placeholder="e.g. 88.5"
-                  />
-                </div>
-              </div>
-
-              {/* Assessment Method & Live Calculations Results Banner */}
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 p-3 bg-white border border-[#e2e8f0] rounded-md mb-4 text-xs">
-                <div>
-                  <label className="text-[11px] font-medium text-neutral-600 block mb-1">Testing Technique</label>
-                  <select
-                    value={calcTestingMethod}
-                    onChange={(e) => setCalcTestingMethod(e.target.value as any)}
-                    className="w-full px-2 py-1 text-xs border border-[#e2e8f0] rounded bg-white text-neutral-800 focus:outline-none"
-                  >
-                    <option value="XRF_SPECTROMETER">XRF Gold Spectrometer (Lab Grade)</option>
-                    <option value="TOUCHSTONE_NITRIC">Touchstone & Nitric Acid Test</option>
-                    <option value="SPECIFIC_GRAVITY">Hydrostatic Specific Gravity Scale</option>
-                  </select>
-                </div>
-
-                <div>
-                  <span className="text-[11px] text-neutral-500 block">Net Gold Weight</span>
-                  <span className="text-base font-medium text-neutral-900 font-mono">
-                    {netWeight.toFixed(3)} g
-                  </span>
-                  <span className="text-[10px] text-neutral-400 block">
-                    Gross - {totalDeductions.toFixed(3)}g deductions
-                  </span>
-                </div>
-
-                <div>
-                  <span className="text-[11px] text-neutral-500 block">Pure 24K Equivalent (-1.5% melt loss)</span>
-                  <span className="text-base font-medium text-amber-700 font-mono">
-                    {fineGoldGrams.toFixed(3)} g
-                  </span>
-                  <span className="text-[10px] text-neutral-400 block">
-                    @ {purityPct}% purity
-                  </span>
-                </div>
-
-                <div className="flex flex-col justify-between">
-                  <div>
-                    <span className="text-[11px] text-neutral-500 block">Payable Credit Value</span>
-                    <span className="text-lg font-medium text-emerald-700 font-mono">
-                      ₹ {finalPayable.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-2 border-t border-[#e2e8f0]">
-                <div className="text-[11px] text-neutral-500 font-mono flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  Rate locked at ₹{buyRate}/g 24K scrap buy rate
-                </div>
-                <button
-                  type="submit"
-                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-2xs cursor-pointer"
-                >
-                  <Receipt className="w-3.5 h-3.5" />
-                  <span>Generate Old Gold Valuation Slip</span>
-                </button>
-              </div>
-            </form>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/sales/exchange-billing"
+                className="text-xs px-2.5 py-1 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 rounded-md font-medium flex items-center gap-1 transition-colors shadow-2xs"
+                title="Credit into Exchange Bill"
+              >
+                <Store className="w-3 h-3 text-emerald-600" />
+                <span>Exchange Billing</span>
+                <ArrowRight className="w-2.5 h-2.5" />
+              </Link>
+              <Link
+                href="/sales/billing-pos"
+                className="text-xs px-2.5 py-1 bg-white border border-neutral-200 text-neutral-700 hover:border-neutral-300 rounded-md font-medium flex items-center gap-1 transition-colors shadow-2xs"
+                title="Use in POS Counter"
+              >
+                <span>POS Billing</span>
+                <ExternalLink className="w-2.5 h-2.5 text-neutral-400" />
+              </Link>
+              <Link
+                href="/branches/rates"
+                className="text-xs px-2.5 py-1 bg-white border border-neutral-200 text-neutral-700 hover:border-neutral-300 rounded-md font-medium flex items-center gap-1 transition-colors shadow-2xs"
+                title="Branch Rate Adjustments"
+              >
+                <span>Branch Rates</span>
+              </Link>
+            </div>
           </div>
-        </div>
 
-        {/* Supabase-style Table / Schema Definition Section */}
-        <div className="p-4 sm:p-5 flex-1 flex flex-col">
-          <div className="bg-white border border-[#e5e7eb] rounded-lg shadow-2xs overflow-hidden flex flex-col flex-1">
-            {/* Table Header Info Bar */}
-            <div className="px-4 py-2.5 border-b border-[#e5e7eb] bg-[#f8fafc] flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2">
+          {/* Metric Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Total Assay Slips</span>
                 <Receipt className="w-4 h-4 text-emerald-600" />
-                <span className="font-mono font-medium text-neutral-800">
-                  old_gold_assessments
-                </span>
-                <span className="text-neutral-400">•</span>
-                <span className="text-neutral-500">
-                  Showing {filteredSlips.length} of {slips.length} assessment slips
-                </span>
               </div>
+              <div className="text-xl font-medium text-neutral-800">{slips.length}</div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">Recorded scrap transactions</div>
+            </div>
 
-              {/* Status Filter & Data/Definition Tab Toggle */}
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 bg-white border border-[#e2e8f0] rounded-md px-2 py-1">
-                  <span className="text-[11px] text-neutral-500">Status:</span>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value as any)}
-                    className="bg-transparent text-xs text-neutral-800 focus:outline-none cursor-pointer"
-                  >
-                    <option value="ALL">All Statuses</option>
-                    <option value="ACCEPTED_IN_BILL">Accepted In Bill</option>
-                    <option value="PENDING_MELT">Pending Melt</option>
-                    <option value="SETTLED_CASH">Settled Cash</option>
-                  </select>
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Total Fine Gold Acquired</span>
+                <Scale className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-xl font-medium text-emerald-700">
+                {totalFinePurchased.toFixed(3)} g
+              </div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">Net pure 999 equivalent</div>
+            </div>
+
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Total Valuation Value</span>
+                <Coins className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-xl font-medium text-neutral-800">
+                ₹ {totalValuationPayable.toLocaleString('en-IN')}
+              </div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">Customer credit / payouts</div>
+            </div>
+
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Testing Standard</span>
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-xl font-medium text-neutral-800">XRF Certified</div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">Non-destructive spectrometer</div>
+            </div>
+          </div>
+
+          {/* Table Container */}
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-2xs overflow-hidden flex flex-col">
+            <div className="p-3 border-b border-[#e2e8f0] flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <Flame className="w-4 h-4 text-emerald-600" />
+                  <span className="text-xs font-medium text-neutral-800">Old Gold Valuation & Assay Slips</span>
+                  <span className="text-[10px] text-neutral-400 font-mono bg-neutral-100 px-1.5 py-0.5 rounded">
+                    rates_old_gold_valuation
+                  </span>
                 </div>
 
-                <div className="flex items-center bg-neutral-200/60 p-0.5 rounded border border-neutral-300/60 text-[13px]">
+                <div className="h-4 w-[1px] bg-neutral-200" />
+
+                <div className="flex items-center gap-1 bg-[#f1f5f9] p-0.5 rounded">
                   <button
                     onClick={() => setActiveTab('data')}
-                    className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
+                    className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors ${
                       activeTab === 'data'
-                        ? 'bg-white text-neutral-900 shadow-2xs'
-                        : 'text-neutral-600 hover:text-neutral-900'
+                        ? 'bg-white text-neutral-800 shadow-2xs'
+                        : 'text-neutral-500 hover:text-neutral-800'
                     }`}
                   >
-                    Data
+                    Slips ({filteredSlips.length})
                   </button>
                   <button
                     onClick={() => setActiveTab('definition')}
-                    className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
+                    className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors ${
                       activeTab === 'definition'
-                        ? 'bg-white text-neutral-900 shadow-2xs'
-                        : 'text-neutral-600 hover:text-neutral-900'
+                        ? 'bg-white text-neutral-800 shadow-2xs'
+                        : 'text-neutral-500 hover:text-neutral-800'
                     }`}
                   >
-                    Definition
+                    Schema Definition
                   </button>
                 </div>
               </div>
+
+              <div className="flex items-center gap-2">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as any)}
+                  className="text-xs px-2 py-1 border border-[#e2e8f0] rounded bg-white text-neutral-700 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="ACCEPTED_IN_BILL">Accepted in Bill</option>
+                  <option value="PENDING_MELT">Pending Melt</option>
+                  <option value="SETTLED_CASH">Settled Cash</option>
+                </select>
+
+                <button
+                  onClick={() => setIsNewSlipModalOpen(true)}
+                  className="px-3 py-1 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium flex items-center gap-1 transition-colors shadow-2xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>New Assay Slip</span>
+                </button>
+              </div>
             </div>
 
-            {/* Table Content: Data Tab */}
             {activeTab === 'data' && (
-              <div className="flex-1 overflow-x-auto custom-scrollbar w-full">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-[#fcfcfc] border-b border-[#e5e7eb] text-neutral-600 font-mono text-[12px]">
-                      <th className="w-10 px-3 py-2 border-r border-[#e5e7eb] text-center">
-                        <input
-                          type="checkbox"
-                          className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                        />
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">slip_no</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">varchar</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">customer</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">contact</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">gross_wt</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">grams</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">deductions</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">grams</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">net_wt</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">grams</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">assessed_purity</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">%</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">fine_gold_eq</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">24k_g</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">final_payable</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">₹_inr</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 font-medium text-center whitespace-nowrap">
-                        <span className="text-neutral-800">status</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#e5e7eb]">
-                    {filteredSlips.map((row) => (
-                      <tr key={row.id} className="hover:bg-[#f8fafc] transition-colors font-mono">
-                        <td className="px-3 py-2 border-r border-[#e5e7eb] text-center">
-                          <input
-                            type="checkbox"
-                            className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                          />
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-emerald-700 font-medium">
-                          {row.slip_no}
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap">
-                          <div className="text-neutral-900 font-sans font-medium">{row.customer_name}</div>
-                          <div className="text-[11px] text-neutral-500">{row.customer_phone}</div>
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-800">
-                          {row.gross_weight_g.toFixed(3)}
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-rose-600">
-                          -{row.deductions_g.toFixed(3)}
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-900 font-medium">
-                          {row.net_weight_g.toFixed(3)}
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-800">
-                          <span className="bg-neutral-100 px-1.5 py-0.5 rounded text-[11px]">
-                            {row.assessed_purity_pct.toFixed(2)}%
-                          </span>
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-amber-700 font-medium">
-                          {row.fine_gold_equivalent_g.toFixed(3)} g
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-emerald-700 font-medium">
-                          ₹ {row.final_payable_inr.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="px-3.5 py-2 whitespace-nowrap text-center">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                              row.status === 'ACCEPTED_IN_BILL'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : row.status === 'PENDING_MELT'
-                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                : 'bg-neutral-100 text-neutral-600 border border-neutral-200'
-                            }`}
-                          >
-                            {row.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                {loading ? (
+                  <div className="p-12 flex flex-col items-center justify-center gap-3 text-neutral-500">
+                    <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+                    <span className="text-xs font-medium">Loading old gold slips from Firestore...</span>
+                  </div>
+                ) : filteredSlips.length === 0 ? (
+                  <div className="p-12 flex flex-col items-center justify-center text-center max-w-md mx-auto">
+                    <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center mb-3">
+                      <Flame className="w-6 h-6 text-emerald-600" />
+                    </div>
+                    <h3 className="text-sm font-medium text-neutral-800 mb-1">No Valuation Slips Found</h3>
+                    <p className="text-xs text-neutral-500 mb-4">
+                      Create old gold assessment slips with gross weight, enamel/stone deductions, XRF purity testing, and melting loss to calculate exact exchange or payout values.
+                    </p>
+                    <button
+                      onClick={() => setIsNewSlipModalOpen(true)}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium flex items-center gap-1.5 transition-colors shadow-2xs"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Create First Assay Slip</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-x-auto custom-scrollbar w-full">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-[#fcfcfc] border-b border-[#e5e7eb] text-neutral-600 font-mono text-[11px]">
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
+                            slip_no
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
+                            customer
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
+                            gross_wt
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
+                            deductions
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
+                            net_wt
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
+                            purity_%
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
+                            fine_gold_eq
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
+                            buy_rate
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
+                            payable_amount
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
+                            method
+                          </th>
+                          <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium text-center whitespace-nowrap">
+                            status
+                          </th>
+                          <th className="px-3 py-2 font-medium text-right whitespace-nowrap">
+                            actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#e5e7eb]">
+                        {filteredSlips.map((row) => (
+                          <tr key={row.id} className="hover:bg-[#f8fafc] transition-colors">
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap font-mono text-neutral-800 font-medium">
+                              {row.slip_no}
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap">
+                              <div className="flex flex-col">
+                                <span className="text-neutral-900 font-medium">{row.customer_name}</span>
+                                <span className="text-[10px] text-neutral-400 font-mono">{row.customer_phone}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-right font-mono text-neutral-700">
+                              {Number(row.gross_weight_g).toFixed(3)} g
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-right font-mono text-red-600">
+                              -{Number(row.deductions_g).toFixed(3)} g
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-right font-mono text-neutral-900 font-medium">
+                              {Number(row.net_weight_g).toFixed(3)} g
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-right font-mono text-neutral-700">
+                              {Number(row.assessed_purity_pct).toFixed(1)}%
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-right font-mono text-emerald-700 font-medium">
+                              {Number(row.fine_gold_equivalent_g).toFixed(3)} g
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-right font-mono text-neutral-700">
+                              ₹ {row.buy_rate_per_g?.toFixed(2)}
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-right font-mono font-medium text-emerald-700">
+                              ₹ {row.final_payable_inr?.toLocaleString('en-IN')}
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap">
+                              <span className="text-[10px] font-mono text-neutral-600 bg-neutral-100 px-1 py-0.5 rounded">
+                                {row.testing_method.replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-center">
+                              <select
+                                value={row.status}
+                                onChange={(e) => handleUpdateStatus(row.id, e.target.value as any)}
+                                className={`text-[10px] px-2 py-0.5 rounded-full font-medium border focus:outline-none cursor-pointer ${
+                                  row.status === 'ACCEPTED_IN_BILL'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : row.status === 'SETTLED_CASH'
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                                }`}
+                              >
+                                <option value="ACCEPTED_IN_BILL">Accepted in Bill</option>
+                                <option value="SETTLED_CASH">Settled Cash</option>
+                                <option value="PENDING_MELT">Pending Melt</option>
+                                <option value="ARCHIVED">Archived</option>
+                              </select>
+                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  onClick={() => setSelectedSlip(row)}
+                                  className="p-1 rounded text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100"
+                                  title="View Slip Details"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteSlip(row.id, row.slip_no)}
+                                  className="p-1 rounded text-neutral-400 hover:text-red-600 hover:bg-red-50"
+                                  title="Delete Slip"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
             )}
 
-            {/* Table Content: Definition Tab */}
             {activeTab === 'definition' && (
-              <div className="p-4 overflow-x-auto font-mono text-xs text-neutral-800 bg-[#fbfbfb] w-full">
-                <div className="bg-neutral-900 text-neutral-100 p-4 rounded-md overflow-x-auto shadow-inner text-[12px] leading-relaxed w-full">
-                  <span className="text-emerald-400">CREATE TABLE</span> public.old_gold_assessments (
+              <div className="p-4 bg-[#fbfbfb] text-xs font-mono">
+                <div className="bg-neutral-900 text-neutral-100 p-4 rounded-md overflow-x-auto shadow-inner text-[11px] leading-relaxed">
+                  <span className="text-emerald-400">CREATE TABLE</span> public.rates_old_gold_valuation (
                   <br />
                   <span className="pl-6 text-blue-300">id</span>{' '}
                   <span className="text-amber-300">uuid</span>{' '}
@@ -619,54 +582,51 @@ export function RatesOldGoldValuationView() {
                   <br />
                   <span className="pl-6 text-blue-300">slip_no</span>{' '}
                   <span className="text-amber-300">varchar(32)</span>{' '}
-                  <span className="text-neutral-400">UNIQUE NOT NULL,</span>
+                  <span className="text-neutral-400">NOT NULL UNIQUE,</span>
                   <br />
                   <span className="pl-6 text-blue-300">customer_name</span>{' '}
-                  <span className="text-amber-300">varchar(120)</span>{' '}
+                  <span className="text-amber-300">varchar(128)</span>{' '}
                   <span className="text-neutral-400">NOT NULL,</span>
                   <br />
                   <span className="pl-6 text-blue-300">customer_phone</span>{' '}
-                  <span className="text-amber-300">varchar(20)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL,</span>
+                  <span className="text-amber-300">varchar(32)</span>,
                   <br />
                   <span className="pl-6 text-blue-300">gross_weight_g</span>{' '}
-                  <span className="text-amber-300">numeric(10,3)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL CHECK (gross_weight_g &gt; 0),</span>
+                  <span className="text-amber-300">numeric(8,3)</span>{' '}
+                  <span className="text-neutral-400">NOT NULL,</span>
                   <br />
                   <span className="pl-6 text-blue-300">deductions_g</span>{' '}
-                  <span className="text-amber-300">numeric(10,3)</span>{' '}
-                  <span className="text-neutral-400">DEFAULT 0.000,</span>
+                  <span className="text-amber-300">numeric(8,3)</span>{' '}
+                  <span className="text-neutral-400">DEFAULT 0,</span>
+                  <br />
+                  <span className="pl-6 text-blue-300">net_weight_g</span>{' '}
+                  <span className="text-amber-300">numeric(8,3)</span>{' '}
+                  <span className="text-neutral-400">NOT NULL,</span>
                   <br />
                   <span className="pl-6 text-blue-300">assessed_purity_pct</span>{' '}
                   <span className="text-amber-300">numeric(5,2)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL CHECK (assessed_purity_pct &gt; 0),</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">fine_gold_equivalent_g</span>{' '}
-                  <span className="text-amber-300">numeric(10,3)</span>{' '}
                   <span className="text-neutral-400">NOT NULL,</span>
                   <br />
-                  <span className="pl-6 text-blue-300">final_payable</span>{' '}
+                  <span className="pl-6 text-blue-300">fine_gold_equivalent_g</span>{' '}
+                  <span className="text-amber-300">numeric(8,3)</span>{' '}
+                  <span className="text-neutral-400">NOT NULL,</span>
+                  <br />
+                  <span className="pl-6 text-blue-300">buy_rate_per_g</span>{' '}
+                  <span className="text-amber-300">numeric(10,2)</span>{' '}
+                  <span className="text-neutral-400">NOT NULL,</span>
+                  <br />
+                  <span className="pl-6 text-blue-300">final_payable_inr</span>{' '}
                   <span className="text-amber-300">numeric(12,2)</span>{' '}
                   <span className="text-neutral-400">NOT NULL,</span>
                   <br />
-                  <span className="pl-6 text-blue-300">status</span>{' '}
-                  <span className="text-amber-300">varchar(24)</span>{' '}
-                  <span className="text-neutral-400">DEFAULT &apos;ACCEPTED_IN_BILL&apos;,</span>
+                  <span className="pl-6 text-blue-300">testing_method</span>{' '}
+                  <span className="text-amber-300">varchar(32)</span>,
                   <br />
-                  <span className="pl-6 text-blue-300">created_at</span>{' '}
-                  <span className="text-amber-300">timestamptz</span>{' '}
-                  <span className="text-neutral-400">DEFAULT now()</span>
+                  <span className="pl-6 text-blue-300">status</span>{' '}
+                  <span className="text-amber-300">varchar(32)</span>{' '}
+                  <span className="text-neutral-400">DEFAULT &apos;ACCEPTED_IN_BILL&apos;</span>
                   <br />
                   );
-                  <br />
-                  <br />
-                  <span className="text-neutral-500">-- Index for customer slip lookup</span>
-                  <br />
-                  <span className="text-emerald-400">CREATE INDEX</span> idx_old_gold_slips{' '}
-                  <span className="text-emerald-400">ON</span> public.old_gold_assessments (slip_no, customer_phone);
-                  <br />
-                  <span className="text-emerald-400">ALTER TABLE</span> public.old_gold_assessments{' '}
-                  <span className="text-emerald-400">ENABLE ROW LEVEL SECURITY;</span>
                 </div>
               </div>
             )}
@@ -674,79 +634,279 @@ export function RatesOldGoldValuationView() {
         </div>
       </div>
 
-      {/* Generated Old Gold Slip Modal */}
-      {isGeneratedModalOpen && activeSlipPreview && (
+      {/* New Slip Modal */}
+      {isNewSlipModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-lg border border-[#e5e7eb] shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in duration-150">
-            <div className="px-5 py-3.5 border-b border-[#e5e7eb] bg-[#f8fafc] flex items-center justify-between">
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-xl w-full max-w-lg overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-[#e2e8f0]">
               <div className="flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-emerald-600" />
-                <span className="text-sm font-medium text-neutral-900">
-                  Old Gold Valuation Slip ({activeSlipPreview.slip_no})
-                </span>
+                <Flame className="w-4 h-4 text-emerald-600" />
+                <h2 className="text-sm font-medium text-neutral-800">New Old Gold Assay & Valuation Slip</h2>
               </div>
               <button
-                onClick={() => setIsGeneratedModalOpen(false)}
-                className="text-neutral-400 hover:text-neutral-700 p-1 rounded transition-colors"
+                onClick={() => setIsNewSlipModalOpen(false)}
+                className="text-neutral-400 hover:text-neutral-700"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-5 space-y-4">
-              <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-md text-xs font-mono space-y-1.5">
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">Customer:</span>
-                  <span className="font-medium text-neutral-800">{activeSlipPreview.customer_name}</span>
+            <form onSubmit={handleCreateSlip} className="p-4 space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">Customer Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={custName}
+                    onChange={(e) => setCustName(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                    placeholder="e.g. Pooja Agarwal"
+                  />
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">Gross Weight:</span>
-                  <span className="text-neutral-800">{activeSlipPreview.gross_weight_g.toFixed(3)} g</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">Deductions (Wax+Stones):</span>
-                  <span className="text-rose-600">-{activeSlipPreview.deductions_g.toFixed(3)} g</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">Net Scrap Weight:</span>
-                  <span className="font-medium text-neutral-800">{activeSlipPreview.net_weight_g.toFixed(3)} g</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">Assessed Purity:</span>
-                  <span className="text-emerald-700 font-medium">{activeSlipPreview.assessed_purity_pct}% ({activeSlipPreview.testing_method})</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">Fine 24K Net (less 1.5% melt):</span>
-                  <span className="text-amber-700 font-medium">{activeSlipPreview.fine_gold_equivalent_g.toFixed(3)} g</span>
-                </div>
-                <div className="pt-2 border-t border-neutral-300 flex justify-between text-sm">
-                  <span className="font-medium text-neutral-900">Credit Payable:</span>
-                  <span className="font-medium text-emerald-700">₹ {activeSlipPreview.final_payable_inr.toLocaleString('en-IN')}</span>
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">Mobile Contact</label>
+                  <input
+                    type="text"
+                    value={custPhone}
+                    onChange={(e) => setCustPhone(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                    placeholder="+91 98490 12891"
+                  />
                 </div>
               </div>
 
-              <div className="text-[11px] text-neutral-500 text-center font-mono">
-                Customer Signature required before chemical melting.
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">Gross Weight (Grams) *</label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    required
+                    value={grossWt}
+                    onChange={(e) => setGrossWt(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">Deductions (Stones, Wax, Enamel)</label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={deductionsWt}
+                    onChange={(e) => setDeductionsWt(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none text-red-600"
+                  />
+                </div>
               </div>
 
-              <div className="pt-3 border-t border-[#e5e7eb] flex items-center justify-end gap-2">
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">Assessed Purity (%) *</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    required
+                    value={purityPct}
+                    onChange={(e) => setPurityPct(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none font-medium text-emerald-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">Melting Loss (%)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={meltingLossPct}
+                    onChange={(e) => setMeltingLossPct(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">Buy Rate (₹ / g) *</label>
+                  <input
+                    type="number"
+                    step="1"
+                    required
+                    value={buyRateG}
+                    onChange={(e) => setBuyRateG(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none font-medium"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">Testing Technique</label>
+                  <select
+                    value={testMethod}
+                    onChange={(e) => setTestMethod(e.target.value as any)}
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-700 focus:border-emerald-500 focus:outline-none"
+                  >
+                    <option value="XRF_SPECTROMETER">XRF Spectrometer (Non-Destructive)</option>
+                    <option value="TOUCHSTONE_NITRIC">Touchstone & Nitric Acid</option>
+                    <option value="SPECIFIC_GRAVITY">Specific Gravity Balance</option>
+                    <option value="FIRE_ASSAY">Fire Assay (Cupellation)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">Settlement Status</label>
+                  <select
+                    value={settlementStatus}
+                    onChange={(e) => setSettlementStatus(e.target.value as any)}
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-700 focus:border-emerald-500 focus:outline-none"
+                  >
+                    <option value="ACCEPTED_IN_BILL">Accepted in Bill (Exchange Credit)</option>
+                    <option value="SETTLED_CASH">Settled Cash / Direct Payout</option>
+                    <option value="PENDING_MELT">Pending Ingot Melt Verification</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-neutral-700 font-medium mb-1">Article Notes / Description</label>
+                <input
+                  type="text"
+                  value={ornamentNotes}
+                  onChange={(e) => setOrnamentNotes(e.target.value)}
+                  className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                  placeholder="e.g. 2 pair gold bangles with lac filling removed"
+                />
+              </div>
+
+              {/* Live Calculation Preview */}
+              <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded p-2.5 space-y-1.5">
+                <span className="text-[10px] font-medium uppercase text-neutral-500 tracking-wider">
+                  Valuation Computed Breakdown:
+                </span>
+                <div className="grid grid-cols-3 gap-2 text-center text-[11px] font-mono">
+                  <div className="p-1.5 bg-white border border-[#e2e8f0] rounded">
+                    <div className="text-neutral-500 text-[10px]">Net Weight</div>
+                    <div className="font-medium text-neutral-800">{calcNet.toFixed(3)} g</div>
+                  </div>
+                  <div className="p-1.5 bg-white border border-[#e2e8f0] rounded">
+                    <div className="text-neutral-500 text-[10px]">Fine 999 Gold</div>
+                    <div className="font-medium text-emerald-700">{calcFineEquivalent.toFixed(3)} g</div>
+                  </div>
+                  <div className="p-1.5 bg-white border border-[#e2e8f0] rounded">
+                    <div className="text-neutral-500 text-[10px]">Final Payout</div>
+                    <div className="font-medium text-emerald-700">₹{calcPayable.toLocaleString('en-IN')}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#e2e8f0]">
                 <button
                   type="button"
-                  onClick={() => setIsGeneratedModalOpen(false)}
-                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 transition-colors cursor-pointer"
+                  onClick={() => setIsNewSlipModalOpen(false)}
+                  className="px-3 py-1.5 border border-[#e2e8f0] text-neutral-600 rounded text-xs hover:bg-neutral-50 font-medium"
                 >
-                  Close
+                  Cancel
                 </button>
                 <button
-                  type="button"
-                  onClick={() => {
-                    alert(`Thermal slip printed for ${activeSlipPreview.slip_no}`);
-                    setIsGeneratedModalOpen(false);
-                  }}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium bg-neutral-900 text-white hover:bg-neutral-800 transition-colors shadow-2xs cursor-pointer"
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
                 >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Print Slip & Link to POS</span>
+                  {saving ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Issuing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Receipt className="w-3.5 h-3.5" />
+                      <span>Issue Slip & Save</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Slip Details / Inspection Modal */}
+      {selectedSlip && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-xl w-full max-w-md overflow-hidden text-xs">
+            <div className="flex items-center justify-between p-4 border-b border-[#e2e8f0]">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-emerald-600" />
+                <h2 className="text-sm font-medium text-neutral-800">
+                  Valuation Voucher {selectedSlip.slip_no}
+                </h2>
+              </div>
+              <button
+                onClick={() => setSelectedSlip(null)}
+                className="text-neutral-400 hover:text-neutral-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="flex items-center justify-between border-b border-[#e2e8f0] pb-2">
+                <div>
+                  <div className="font-medium text-neutral-800 text-sm">{selectedSlip.customer_name}</div>
+                  <div className="text-neutral-400 font-mono text-[11px]">{selectedSlip.customer_phone}</div>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  {selectedSlip.status.replace(/_/g, ' ')}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-neutral-600">
+                <div>Gross Weight:</div>
+                <div className="font-mono text-neutral-800 text-right">{selectedSlip.gross_weight_g} g</div>
+                <div>Deductions:</div>
+                <div className="font-mono text-red-600 text-right">-{selectedSlip.deductions_g} g</div>
+                <div>Net Weight:</div>
+                <div className="font-mono text-neutral-800 font-medium text-right">{selectedSlip.net_weight_g} g</div>
+                <div>Assessed Purity:</div>
+                <div className="font-mono text-neutral-800 text-right">{selectedSlip.assessed_purity_pct}%</div>
+                <div>Fine Gold (999 eq):</div>
+                <div className="font-mono text-emerald-700 font-medium text-right">
+                  {selectedSlip.fine_gold_equivalent_g} g
+                </div>
+                <div>Buy Rate Applied:</div>
+                <div className="font-mono text-neutral-800 text-right">₹{selectedSlip.buy_rate_per_g}/g</div>
+                <div>Testing Method:</div>
+                <div className="font-mono text-neutral-800 text-right">
+                  {selectedSlip.testing_method.replace(/_/g, ' ')}
+                </div>
+              </div>
+
+              <div className="p-3 bg-emerald-50 rounded border border-emerald-200 flex items-center justify-between">
+                <span className="text-emerald-900 font-medium">Final Credit / Payable:</span>
+                <span className="text-base font-mono font-medium text-emerald-800">
+                  ₹{selectedSlip.final_payable_inr?.toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              {selectedSlip.valuer_notes && (
+                <div className="text-[11px] text-neutral-500 italic bg-neutral-50 p-2 rounded border border-[#e2e8f0]">
+                  Notes: {selectedSlip.valuer_notes}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-2 border-t border-[#e2e8f0]">
+                <Link
+                  href="/sales/exchange-billing"
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium flex items-center gap-1.5 transition-colors"
+                >
+                  <Store className="w-3.5 h-3.5" />
+                  <span>Credit in POS Exchange Bill</span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSlip(null)}
+                  className="px-3 py-1.5 border border-[#e2e8f0] text-neutral-600 rounded text-xs hover:bg-neutral-50 font-medium"
+                >
+                  Close
                 </button>
               </div>
             </div>

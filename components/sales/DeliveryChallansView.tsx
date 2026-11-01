@@ -1,17 +1,40 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
+import { SalesSubNav } from './SalesSubNav';
 import {
   Truck,
   Scale,
   CheckCircle2,
   X,
   BadgeIndianRupee,
+  Plus,
+  Trash2,
+  Loader2,
+  AlertCircle,
+  Search,
+  ExternalLink,
+  Eye,
+  RefreshCw,
+  Printer,
+  ShieldCheck,
+  Calendar,
+  ArrowRight,
 } from 'lucide-react';
+import { db } from '@/lib/firebase';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  deleteDoc,
+  doc,
+  updateDoc,
+} from 'firebase/firestore';
 
-interface DeliveryChallan {
+export interface DeliveryChallan {
   id: string;
   challan_no: string;
   destination: string;
@@ -26,525 +49,578 @@ interface DeliveryChallan {
   approval_value: number;
   status: 'DISPATCHED' | 'PARTIALLY_SOLD' | 'FULLY_RETURNED';
   notes: string;
+  created_at: string;
 }
 
-const INITIAL_CHALLANS: DeliveryChallan[] = [
-  {
-    id: 'ff837162-8192-4bb7-b892-230912c98aef',
-    challan_no: 'DC-2026-0081',
-    destination: 'VIP Customer Home Trial',
-    recipient_name: 'Smt. Shailaja Reddy (Banjara Hills)',
-    recipient_phone: '+91 98490 88120',
-    total_items: 4,
-    total_weight_g: 62.400,
-    security_seal_no: 'SLJ-SEAL-8910',
-    custodian: 'M. Sridhar (Senior Sales Exec)',
-    dispatched_at: '2026-10-31 10:30 AM',
-    return_due_date: '2026-10-31 18:00',
-    approval_value: 520000.00,
-    status: 'DISPATCHED',
-    notes: 'Emerald Diamond Choker, Polki Jhumkas, Antique Kada pair',
-  },
-  {
-    id: 'ff837162-8192-4bb7-b892-230912c98af0',
-    challan_no: 'DC-2026-0080',
-    destination: 'Jewellery Exhibition Stall',
-    recipient_name: 'Novotel HICC Expo Pavilion Stall #14',
-    recipient_phone: '+91 94411 22901',
-    total_items: 18,
-    total_weight_g: 215.800,
-    security_seal_no: 'SLJ-SEAL-8909',
-    custodian: 'R. K. Naidu (Store Manager)',
-    dispatched_at: '2026-10-30 08:00 AM',
-    return_due_date: '2026-11-02 20:00',
-    approval_value: 1840000.00,
-    status: 'DISPATCHED',
-    notes: 'Bridal necklace sets & temple antique showcase showcase',
-  },
-  {
-    id: 'ff837162-8192-4bb7-b892-230912c98af1',
-    challan_no: 'DC-2026-0079',
-    destination: 'Celebrity Photoshoot Approval',
-    recipient_name: 'Studio Lotus / Film Nagar',
-    recipient_phone: '+91 97000 44192',
-    total_items: 6,
-    total_weight_g: 58.200,
-    security_seal_no: 'SLJ-SEAL-8908',
-    custodian: 'Deepak Varma',
-    dispatched_at: '2026-10-29 11:00 AM',
-    return_due_date: '2026-10-30 14:00',
-    approval_value: 485000.00,
-    status: 'PARTIALLY_SOLD',
-    notes: '1 Solitaire Ring purchased on bill POS-2026-1039, 5 items returned',
-  },
-  {
-    id: 'ff837162-8192-4bb7-b892-230912c98af2',
-    challan_no: 'DC-2026-0078',
-    destination: 'Branch Consignment',
-    recipient_name: 'Madhapur Express Store',
-    recipient_phone: '+91 98450 33819',
-    total_items: 10,
-    total_weight_g: 76.100,
-    security_seal_no: 'SLJ-SEAL-8907',
-    custodian: 'Armored Carrier BVC',
-    dispatched_at: '2026-10-28 09:30 AM',
-    return_due_date: '2026-10-29 18:00',
-    approval_value: 635000.00,
-    status: 'FULLY_RETURNED',
-    notes: 'Reconciliation verified with Zero weight discrepancy',
-  },
-];
-
 export function SalesDeliveryChallansView() {
-  const [challans, setChallans] = useState<DeliveryChallan[]>(INITIAL_CHALLANS);
-  const [activeTab, setActiveTab] = useState<'data' | 'definition'>('data');
+  const [challans, setChallans] = useState<DeliveryChallan[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Toast
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'idle'>('idle');
+
+  // Filters & Search
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'DISPATCHED' | 'PARTIALLY_SOLD' | 'FULLY_RETURNED'>('ALL');
+
+  // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedChallan, setSelectedChallan] = useState<DeliveryChallan | null>(null);
-  const [isReconcileModalOpen, setIsReconcileModalOpen] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Form State
+  const [challanNo, setChallanNo] = useState('');
   const [destination, setDestination] = useState('VIP Customer Home Trial');
-  const [recipient, setRecipient] = useState('');
-  const [phone, setPhone] = useState('');
+  const [recipientName, setRecipientName] = useState('');
+  const [recipientPhone, setRecipientPhone] = useState('');
+  const [totalItems, setTotalItems] = useState('1');
+  const [totalWeight, setTotalWeight] = useState('');
+  const [securitySeal, setSecuritySeal] = useState('');
   const [custodian, setCustodian] = useState('M. Sridhar (Senior Sales Exec)');
-  const [itemsCount, setItemsCount] = useState('4');
-  const [totalWeight, setTotalWeight] = useState('48.500');
-  const [sealNo, setSealNo] = useState('SLJ-SEAL-8910');
-  const [dueDate, setDueDate] = useState('2026-11-01 18:00');
-  const [approvalVal, setApprovalVal] = useState('420000');
+  const [returnDueDate, setReturnDueDate] = useState('');
+  const [approvalValue, setApprovalValue] = useState('');
   const [notes, setNotes] = useState('');
 
-  const handleCreateChallan = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newChallan: DeliveryChallan = {
-      id: `dc-${challans.length + 1}-${recipient.slice(0, 3)}`,
-      challan_no: `DC-2026-00${82 + challans.length}`,
-      destination,
-      recipient_name: recipient,
-      recipient_phone: phone,
-      total_items: parseInt(itemsCount) || 1,
-      total_weight_g: parseFloat(totalWeight) || 0,
-      security_seal_no: sealNo,
-      custodian,
-      dispatched_at: '2026-10-31 12:00 PM',
-      return_due_date: dueDate,
-      approval_value: parseFloat(approvalVal) || 0,
-      status: 'DISPATCHED',
-      notes,
-    };
+  const showToast = (type: 'success' | 'error', msg: string) => {
+    setToastType(type);
+    setToastMessage(msg);
+    setTimeout(() => setToastType('idle'), 4000);
+  };
 
-    setChallans([newChallan, ...challans]);
-    setIsAddModalOpen(false);
-    setRecipient('');
-    setPhone('');
+  const fetchChallans = async () => {
+    try {
+      setLoading(true);
+      const snapshot = await getDocs(collection(db, 'sales_delivery_challans'));
+      const list: DeliveryChallan[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...(docSnap.data() as Omit<DeliveryChallan, 'id'>) });
+      });
+      list.sort((a, b) => new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime());
+      setChallans(list);
+    } catch (err: unknown) {
+      console.error('Error fetching challans:', err);
+      showToast('error', 'Failed to load delivery challans from database.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchChallans();
+  }, []);
+
+  const handleOpenAddModal = () => {
+    const yr = new Date().getFullYear();
+    setChallanNo(`DC-${yr}-${Math.floor(1000 + Math.random() * 9000)}`);
+    setDestination('VIP Customer Home Trial');
+    setRecipientName('');
+    setRecipientPhone('');
+    setTotalItems('1');
+    setTotalWeight('');
+    setSecuritySeal(`SLJ-SEAL-${Math.floor(1000 + Math.random() * 9000)}`);
+    setCustodian('M. Sridhar (Senior Sales Exec)');
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    setReturnDueDate(d.toISOString().split('T')[0]);
+    setApprovalValue('');
     setNotes('');
+    setIsAddModalOpen(true);
   };
 
-  const handleReconcileSubmit = (status: 'FULLY_RETURNED' | 'PARTIALLY_SOLD') => {
-    if (!selectedChallan) return;
-    setChallans(
-      challans.map((c) => (c.id === selectedChallan.id ? { ...c, status } : c))
-    );
-    setIsReconcileModalOpen(false);
+  const handleCreateChallan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const wt = parseFloat(totalWeight) || 0;
+    const val = parseFloat(approvalValue) || 0;
+    if (!recipientName.trim() || wt <= 0) {
+      showToast('error', 'Recipient name and valid total weight are required.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const challanData = {
+        challan_no: challanNo.trim(),
+        destination,
+        recipient_name: recipientName.trim(),
+        recipient_phone: recipientPhone.trim() || 'N/A',
+        total_items: parseInt(totalItems) || 1,
+        total_weight_g: wt,
+        security_seal_no: securitySeal.trim(),
+        custodian: custodian.trim(),
+        dispatched_at: new Date().toISOString(),
+        return_due_date: returnDueDate,
+        approval_value: val,
+        status: 'DISPATCHED' as const,
+        notes: notes.trim(),
+        created_at: new Date().toISOString(),
+      };
+
+      const docRef = await addDoc(collection(db, 'sales_delivery_challans'), challanData);
+      const newChallan: DeliveryChallan = { id: docRef.id, ...challanData };
+      setChallans((prev) => [newChallan, ...prev]);
+      setIsAddModalOpen(false);
+      showToast('success', `Delivery challan ${newChallan.challan_no} created successfully.`);
+    } catch (err: unknown) {
+      console.error('Error creating challan:', err);
+      showToast('error', 'Failed to save delivery challan to Firestore.');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  const handleUpdateStatus = async (id: string, newStatus: DeliveryChallan['status']) => {
+    try {
+      await updateDoc(doc(db, 'sales_delivery_challans', id), { status: newStatus });
+      setChallans((prev) => prev.map((c) => (c.id === id ? { ...c, status: newStatus } : c)));
+      showToast('success', `Challan status updated to ${newStatus.replace(/_/g, ' ')}`);
+    } catch (err: unknown) {
+      console.error('Error updating status:', err);
+      showToast('error', 'Failed to update challan status.');
+    }
+  };
+
+  const handleDeleteChallan = async (id: string) => {
+    try {
+      setDeletingId(id);
+      await deleteDoc(doc(db, 'sales_delivery_challans', id));
+      setChallans((prev) => prev.filter((c) => c.id !== id));
+      setDeleteConfirmId(null);
+      showToast('success', 'Challan record deleted.');
+    } catch (err: unknown) {
+      console.error('Error deleting challan:', err);
+      showToast('error', 'Failed to delete delivery challan.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const filteredChallans = challans.filter((c) => {
+    const s = searchQuery.toLowerCase();
+    const matchesSearch =
+      c.challan_no?.toLowerCase().includes(s) ||
+      c.recipient_name?.toLowerCase().includes(s) ||
+      c.destination?.toLowerCase().includes(s) ||
+      c.security_seal_no?.toLowerCase().includes(s) ||
+      c.custodian?.toLowerCase().includes(s);
+    const matchesStatus = statusFilter === 'ALL' || c.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  const totalApprovalValue = challans.reduce((acc, curr) => acc + (curr.approval_value || 0), 0);
+  const activeDispatchedCount = challans.filter((c) => c.status === 'DISPATCHED').length;
+  const totalWeightOut = challans.reduce((acc, curr) => acc + (curr.total_weight_g || 0), 0);
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0">
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0 font-sans">
       <TabBar title="sales_delivery_challans" />
       <ActionToolbar
-        filterPlaceholder="Filter by challan #, destination, custodian..."
-        insertLabel="Create Delivery Challan"
-        onInsertClick={() => setIsAddModalOpen(true)}
+        filterPlaceholder="Filter by challan #, recipient, destination, seal..."
+        insertLabel="New Delivery Challan"
+        onRefresh={fetchChallans}
+        onInsertClick={handleOpenAddModal}
       />
+      <SalesSubNav />
 
       <div className="flex-1 overflow-y-auto bg-[#fafafa] flex flex-col custom-scrollbar w-full">
-        {/* KPI Metrics */}
-        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white">
+        <div className="p-4 sm:p-5 flex flex-col gap-4 max-w-7xl w-full mx-auto">
+          {/* Toast */}
+          {toastType === 'success' && (
+            <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-medium">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{toastMessage}</span>
+            </div>
+          )}
+          {toastType === 'error' && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs font-medium">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <span>{toastMessage}</span>
+            </div>
+          )}
+
+          {/* Metric Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
               <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Active Challans</span>
-                <Truck className="w-3.5 h-3.5 text-amber-600" />
+                <span className="text-[11px] font-medium uppercase tracking-wider">Active Dispatched</span>
+                <Truck className="w-4 h-4 text-emerald-600" />
               </div>
-              <div className="text-xl font-medium text-neutral-900">6 Challans</div>
-              <div className="text-[11px] text-amber-700 mt-1 font-mono">
-                Outward on approval
-              </div>
+              <div className="text-xl font-medium text-neutral-800">{activeDispatchedCount}</div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">{challans.length} Total logged</div>
             </div>
 
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
               <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Ornaments in Transit</span>
-                <Scale className="w-3.5 h-3.5 text-blue-600" />
+                <span className="text-[11px] font-medium uppercase tracking-wider">Out on Approval Val</span>
+                <BadgeIndianRupee className="w-4 h-4 text-emerald-600" />
               </div>
-              <div className="text-xl font-medium text-neutral-900">412.500 g</div>
-              <div className="text-[11px] text-blue-700 mt-1 font-mono">
-                38 tagged jewellery pcs
+              <div className="text-xl font-medium text-neutral-800">
+                ₹{totalApprovalValue.toLocaleString('en-IN')}
               </div>
+              <div className="text-[10px] text-emerald-600 mt-0.5">Transit insured valuation</div>
             </div>
 
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
               <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Value on Approval</span>
-                <BadgeIndianRupee className="w-3.5 h-3.5 text-purple-600" />
+                <span className="text-[11px] font-medium uppercase tracking-wider">Total Weight Out</span>
+                <Scale className="w-4 h-4 text-emerald-600" />
               </div>
-              <div className="text-xl font-medium text-purple-700">₹ 34.80 Lakhs</div>
-              <div className="text-[11px] text-neutral-500 mt-1 font-mono">
-                Fully insured in-transit
+              <div className="text-xl font-medium text-neutral-800">
+                {totalWeightOut.toFixed(3)} <span className="text-xs text-neutral-500 font-normal">g</span>
               </div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">Consignment gold content</div>
             </div>
 
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
               <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Reconciled Today</span>
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="text-[11px] font-medium uppercase tracking-wider">Reconciled Status</span>
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
               </div>
-              <div className="text-xl font-medium text-emerald-700">2 Challans</div>
-              <div className="text-[11px] text-emerald-600 mt-1 font-mono">
-                100% Items accounted for
+              <div className="text-xl font-medium text-emerald-700">
+                {challans.filter((c) => c.status === 'FULLY_RETURNED').length} Returned
               </div>
+              <div className="text-[10px] text-neutral-500 mt-0.5">Zero weight variance</div>
             </div>
           </div>
-        </div>
 
-        {/* Supabase-style Table */}
-        <div className="p-4 sm:p-5 flex-1 flex flex-col">
-          <div className="bg-white border border-[#e5e7eb] rounded-lg shadow-2xs overflow-hidden flex flex-col flex-1">
-            <div className="px-4 py-2.5 border-b border-[#e5e7eb] bg-[#f8fafc] flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <Truck className="w-4 h-4 text-emerald-600" />
-                <span className="font-mono font-medium text-neutral-800">delivery_challans</span>
-                <span className="text-neutral-400">•</span>
-                <span className="text-neutral-500">Showing {challans.length} outward approval records</span>
-              </div>
-
-              <div className="flex items-center bg-neutral-200/60 p-0.5 rounded border border-neutral-300/60 text-[13px]">
-                <button
-                  onClick={() => setActiveTab('data')}
-                  className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
-                    activeTab === 'data'
-                      ? 'bg-white text-neutral-900 shadow-2xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  Data
-                </button>
-                <button
-                  onClick={() => setActiveTab('definition')}
-                  className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
-                    activeTab === 'definition'
-                      ? 'bg-white text-neutral-900 shadow-2xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  Definition
-                </button>
+          {/* Filters & Actions Bar */}
+          <div className="bg-white p-3 rounded-lg border border-[#e2e8f0] flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-center gap-2 flex-1 max-w-md">
+              <div className="relative w-full">
+                <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search challan #, recipient, destination, seal..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 border border-[#e2e8f0] rounded-md text-xs text-neutral-800 placeholder:text-neutral-400 focus:border-emerald-500 focus:outline-none font-medium"
+                />
               </div>
             </div>
 
-            {activeTab === 'data' && (
-              <div className="flex-1 overflow-x-auto custom-scrollbar w-full">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-neutral-500 font-medium">Status:</span>
+              {(['ALL', 'DISPATCHED', 'PARTIALLY_SOLD', 'FULLY_RETURNED'] as const).map((st) => (
+                <button
+                  key={st}
+                  onClick={() => setStatusFilter(st)}
+                  className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
+                    statusFilter === st
+                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                      : 'bg-neutral-50 text-neutral-600 border border-[#e2e8f0] hover:bg-neutral-100'
+                  }`}
+                >
+                  {st.replace(/_/g, ' ')}
+                </button>
+              ))}
+
+              <Link
+                href="/inventory/ornaments"
+                className="ml-2 px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded font-medium text-[11px] flex items-center gap-1 transition-colors"
+              >
+                <span>Stock Vault</span>
+                <ArrowRight className="w-3 h-3" />
+              </Link>
+            </div>
+          </div>
+
+          {/* Table / Empty State */}
+          {loading ? (
+            <div className="p-12 flex flex-col items-center justify-center bg-white rounded-lg border border-[#e2e8f0]">
+              <Loader2 className="w-6 h-6 text-emerald-600 animate-spin mb-2" />
+              <span className="text-xs text-neutral-500 font-medium">Loading delivery challans from Firestore...</span>
+            </div>
+          ) : filteredChallans.length === 0 ? (
+            <div className="p-12 flex flex-col items-center justify-center bg-white rounded-lg border border-[#e2e8f0] text-center">
+              <Truck className="w-10 h-10 text-neutral-300 mb-3 stroke-1" />
+              <h3 className="text-sm font-medium text-neutral-800 mb-1">No Delivery Challans Found</h3>
+              <p className="text-xs text-neutral-500 max-w-sm mb-4">
+                {searchQuery
+                  ? 'No delivery challans match your search query.'
+                  : 'No out-on-approval challans or gate passes logged yet. Dispatch jewellery for home trial, exhibitions or photoshoots.'}
+              </p>
+              <button
+                onClick={handleOpenAddModal}
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-medium shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Create Delivery Challan</span>
+              </button>
+            </div>
+          ) : (
+            <div className="bg-white rounded-lg border border-[#e2e8f0] overflow-hidden shadow-2xs">
+              <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="bg-[#fcfcfc] border-b border-[#e5e7eb] text-neutral-600 font-mono text-[11px]">
-                      <th className="w-10 px-3 py-2 border-r border-[#e5e7eb] text-center">
-                        <input
-                          type="checkbox"
-                          className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                        />
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">challan_no</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">destination & recipient</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-center">
-                        <span className="text-neutral-800">items</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <span className="text-neutral-800">total_weight_g</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <span className="text-neutral-800">approval_val</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">security_seal</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">custodian</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">due_date</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">status</span>
-                      </th>
-                      <th className="px-3 py-2 font-medium whitespace-nowrap text-center">Actions</th>
+                    <tr className="bg-neutral-50 border-b border-[#e2e8f0] text-neutral-600 font-medium text-[11px]">
+                      <th className="py-2.5 px-3">Challan #</th>
+                      <th className="py-2.5 px-3">Destination</th>
+                      <th className="py-2.5 px-3">Recipient</th>
+                      <th className="py-2.5 px-2 text-right">Items</th>
+                      <th className="py-2.5 px-2 text-right">Total Wt</th>
+                      <th className="py-2.5 px-3 text-right">Approval Value</th>
+                      <th className="py-2.5 px-3">Security Seal</th>
+                      <th className="py-2.5 px-3 text-center">Status</th>
+                      <th className="py-2.5 px-3 text-center">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#f1f5f9]">
-                    {challans.map((row) => (
-                      <tr key={row.id} className="hover:bg-neutral-50/80 transition-colors">
-                        <td className="w-10 px-3 py-2 border-r border-[#e5e7eb] text-center">
-                          <input
-                            type="checkbox"
-                            className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                          />
+                  <tbody className="divide-y divide-[#e2e8f0]">
+                    {filteredChallans.map((c) => (
+                      <tr key={c.id} className="hover:bg-neutral-50/70 transition-colors">
+                        <td className="py-2.5 px-3 font-mono font-medium text-neutral-800">
+                          {c.challan_no}
+                          <div className="text-[10px] text-neutral-400 font-sans">
+                            Due: {c.return_due_date || 'Same Day'}
+                          </div>
                         </td>
-                        <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap font-mono text-[11px]">
-                          <span
-                            onClick={() => {
-                              setSelectedChallan(row);
-                              setIsReconcileModalOpen(true);
-                            }}
-                            className="font-medium text-emerald-700 hover:underline cursor-pointer"
-                          >
-                            {row.challan_no}
-                          </span>
+                        <td className="py-2.5 px-3">
+                          <div className="font-medium text-neutral-800">{c.destination}</div>
+                          <div className="text-[10px] text-neutral-500 font-mono">Custodian: {c.custodian}</div>
                         </td>
-                        <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap font-medium text-neutral-800">
-                          <div>{row.destination}</div>
-                          <div className="text-[10px] text-neutral-500 font-normal">{row.recipient_name}</div>
+                        <td className="py-2.5 px-3">
+                          <div className="font-medium text-neutral-800">{c.recipient_name}</div>
+                          <div className="text-[10px] text-neutral-400 font-mono">{c.recipient_phone}</div>
                         </td>
-                        <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap font-mono text-center text-neutral-700">
-                          {row.total_items} pcs
+                        <td className="py-2.5 px-2 text-right font-mono text-neutral-700">
+                          {c.total_items}
                         </td>
-                        <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap font-mono text-right text-neutral-800 font-medium">
-                          {row.total_weight_g.toFixed(3)} g
+                        <td className="py-2.5 px-2 text-right font-mono text-neutral-700">
+                          {c.total_weight_g?.toFixed(3)}g
                         </td>
-                        <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap font-mono text-right text-neutral-700">
-                          ₹ {row.approval_value.toLocaleString('en-IN')}
+                        <td className="py-2.5 px-3 text-right font-mono font-medium text-emerald-700">
+                          ₹{c.approval_value?.toLocaleString('en-IN')}
                         </td>
-                        <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap font-mono text-[10px] text-neutral-600">
-                          {row.security_seal_no}
+                        <td className="py-2.5 px-3 font-mono text-[11px] text-neutral-600">
+                          {c.security_seal_no || 'SEAL-OK'}
                         </td>
-                        <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-700 text-[11px]">
-                          {row.custodian}
-                        </td>
-                        <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap font-mono text-[11px] text-neutral-600">
-                          {row.return_due_date}
-                        </td>
-                        <td className="px-3 py-2 border-r border-[#e5e7eb] whitespace-nowrap">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded text-[10px] font-medium ${
-                              row.status === 'FULLY_RETURNED'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : row.status === 'PARTIALLY_SOLD'
-                                ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                                : 'bg-amber-50 text-amber-700 border border-amber-200'
+                        <td className="py-2.5 px-3 text-center">
+                          <select
+                            value={c.status}
+                            onChange={(e) => handleUpdateStatus(c.id, e.target.value as any)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-medium font-mono border focus:outline-none cursor-pointer ${
+                              c.status === 'FULLY_RETURNED'
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                : c.status === 'DISPATCHED'
+                                ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                : 'bg-blue-100 text-blue-800 border-blue-300'
                             }`}
                           >
-                            {row.status}
-                          </span>
+                            <option value="DISPATCHED">Dispatched</option>
+                            <option value="PARTIALLY_SOLD">Partially Sold</option>
+                            <option value="FULLY_RETURNED">Fully Returned</option>
+                          </select>
                         </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-center">
-                          <button
-                            onClick={() => {
-                              setSelectedChallan(row);
-                              setIsReconcileModalOpen(true);
-                            }}
-                            className="px-2 py-1 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[11px] font-medium border border-neutral-300 transition-colors cursor-pointer"
-                          >
-                            Reconcile
-                          </button>
+                        <td className="py-2.5 px-3 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedChallan(c);
+                                setIsViewModalOpen(true);
+                              }}
+                              className="p-1 rounded text-neutral-500 hover:text-emerald-700 hover:bg-neutral-100 transition-colors"
+                              title="View Gate Pass"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setDeleteConfirmId(c.id)}
+                              className="p-1 rounded text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                              title="Delete Challan"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            )}
-
-            {activeTab === 'definition' && (
-              <div className="p-4 overflow-x-auto font-mono text-xs text-neutral-800 bg-[#fbfbfb] w-full">
-                <div className="bg-neutral-900 text-neutral-100 p-4 rounded-md overflow-x-auto shadow-inner text-[12px] leading-relaxed w-full">
-                  <span className="text-emerald-400">CREATE TABLE</span> public.delivery_challans (
-                  <br />
-                  <span className="pl-6 text-blue-300">id</span> <span className="text-amber-300">uuid</span> <span className="text-neutral-400">DEFAULT gen_random_uuid() PRIMARY KEY,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">challan_no</span> <span className="text-amber-300">varchar(32)</span> <span className="text-neutral-400">UNIQUE NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">destination</span> <span className="text-amber-300">varchar(255)</span> <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">total_items</span> <span className="text-amber-300">integer</span> <span className="text-neutral-400">NOT NULL CHECK (total_items &gt; 0),</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">total_weight_g</span> <span className="text-amber-300">numeric(10,3)</span> <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">status</span> <span className="text-amber-300">varchar(32)</span> <span className="text-neutral-400">DEFAULT &apos;DISPATCHED&apos;</span>
-                  <br />
-                  );
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* New Challan Modal */}
+      {/* CREATE NEW CHALLAN MODAL */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 bg-neutral-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full border border-[#e2e8f0] overflow-hidden">
-            <div className="px-5 py-4 border-b border-[#e5e7eb] flex items-center justify-between bg-[#f8fafc]">
+        <div className="fixed inset-0 z-50 bg-neutral-900/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-5 border border-[#e2e8f0] animate-fadeIn text-xs max-h-[92vh] overflow-y-auto custom-scrollbar">
+            <div className="flex items-center justify-between pb-3 border-b border-[#e2e8f0] mb-4">
               <div className="flex items-center gap-2">
                 <Truck className="w-4 h-4 text-emerald-600" />
-                <h3 className="text-sm font-medium text-neutral-900">
-                  Create Outward Delivery Challan
-                </h3>
+                <span className="font-medium text-neutral-800 text-sm">Issue Outward Delivery Challan / Gate Pass</span>
               </div>
               <button
+                type="button"
                 onClick={() => setIsAddModalOpen(false)}
-                className="text-neutral-400 hover:text-neutral-600 p-1"
+                className="text-neutral-400 hover:text-neutral-700"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateChallan} className="p-5 space-y-3.5">
-              <div>
-                <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                  Challan Destination / Purpose
-                </label>
-                <select
-                  value={destination}
-                  onChange={(e) => setDestination(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none cursor-pointer"
-                >
-                  <option value="VIP Customer Home Trial">VIP Customer Home Trial</option>
-                  <option value="Jewellery Exhibition Stall">Jewellery Exhibition Stall</option>
-                  <option value="Celebrity Photoshoot Approval">Celebrity Photoshoot Approval</option>
-                  <option value="Branch Consignment">Branch Consignment Transfer</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+            <form onSubmit={handleCreateChallan} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Recipient Name / Client
-                  </label>
+                  <label className="block text-neutral-600 font-medium mb-1">Challan No *</label>
                   <input
                     type="text"
                     required
-                    value={recipient}
-                    onChange={(e) => setRecipient(e.target.value)}
-                    placeholder="e.g. Smt. Shailaja Reddy"
-                    className="w-full px-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none"
+                    value={challanNo}
+                    onChange={(e) => setChallanNo(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
+
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Phone (+91)
-                  </label>
+                  <label className="block text-neutral-600 font-medium mb-1">Destination Purpose</label>
+                  <select
+                    value={destination}
+                    onChange={(e) => setDestination(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                  >
+                    <option value="VIP Customer Home Trial">VIP Customer Home Trial</option>
+                    <option value="Jewellery Exhibition Stall">Jewellery Exhibition Stall</option>
+                    <option value="Celebrity Photoshoot Approval">Celebrity Photoshoot Approval</option>
+                    <option value="Branch Consignment">Branch Consignment</option>
+                    <option value="Goldsmith Repair / Jobwork">Goldsmith Repair / Jobwork</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-neutral-600 font-medium mb-1">Return Due Date</label>
                   <input
-                    type="text"
+                    type="date"
                     required
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+91 98490 88120"
-                    className="w-full px-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none"
+                    value={returnDueDate}
+                    onChange={(e) => setReturnDueDate(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded text-neutral-800 focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {/* Recipient & Custodian */}
+              <div className="p-3 bg-neutral-50 rounded-lg border border-[#e2e8f0] space-y-2.5">
+                <span className="font-medium text-neutral-700 block text-[11px] uppercase tracking-wider">
+                  Recipient & Security Custodian
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-neutral-600 font-medium mb-1">Recipient / Location Name *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Smt. Shailaja Reddy"
+                      value={recipientName}
+                      onChange={(e) => setRecipientName(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-[#e2e8f0] bg-white rounded text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-neutral-600 font-medium mb-1">Recipient Phone</label>
+                    <input
+                      type="text"
+                      placeholder="+91 98490 88120"
+                      value={recipientPhone}
+                      onChange={(e) => setRecipientPhone(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-[#e2e8f0] bg-white rounded text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-neutral-600 font-medium mb-1">Escort / Custodian</label>
+                    <input
+                      type="text"
+                      value={custodian}
+                      onChange={(e) => setCustodian(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-[#e2e8f0] bg-white rounded text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Items & Weights */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Items Count
-                  </label>
+                  <label className="block text-neutral-600 font-medium mb-1">Total Pieces / Items</label>
                   <input
                     type="number"
-                    value={itemsCount}
-                    onChange={(e) => setItemsCount(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs font-mono border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none"
+                    value={totalItems}
+                    onChange={(e) => setTotalItems(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
+
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Total Weight (g)
-                  </label>
+                  <label className="block text-neutral-600 font-medium mb-1">Total Scale Weight (g) *</label>
                   <input
                     type="number"
                     step="0.001"
+                    required
+                    placeholder="0.000"
                     value={totalWeight}
                     onChange={(e) => setTotalWeight(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs font-mono border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none"
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
+
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Approval Value (₹)
-                  </label>
+                  <label className="block text-neutral-600 font-medium mb-1">Insurance / Approval Value (₹)</label>
                   <input
                     type="number"
-                    value={approvalVal}
-                    onChange={(e) => setApprovalVal(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs font-mono border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Security Seal #
-                  </label>
-                  <input
-                    type="text"
-                    value={sealNo}
-                    onChange={(e) => setSealNo(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs font-mono border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Assigned Store Custodian
-                  </label>
-                  <input
-                    type="text"
-                    value={custodian}
-                    onChange={(e) => setCustodian(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Return Due Date & Time
-                  </label>
-                  <input
-                    type="text"
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs font-mono border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none"
+                    placeholder="0"
+                    value={approvalValue}
+                    onChange={(e) => setApprovalValue(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                  Ornaments Tag Description / Notes
-                </label>
-                <textarea
-                  rows={2}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="e.g. 22K Emerald Choker, Pair of Antique Kadas, Ruby Jhumkas"
-                  className="w-full px-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none"
+                <label className="block text-neutral-600 font-medium mb-1">Security Seal Number</label>
+                <input
+                  type="text"
+                  placeholder="SLJ-SEAL-8910"
+                  value={securitySeal}
+                  onChange={(e) => setSecuritySeal(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded font-mono uppercase text-neutral-800 focus:border-emerald-500 focus:outline-none"
                 />
               </div>
 
-              <div className="pt-3 border-t border-[#e5e7eb] flex justify-end gap-2">
+              <div>
+                <label className="block text-neutral-600 font-medium mb-1">Itemized Ornaments Breakdown</label>
+                <textarea
+                  rows={3}
+                  placeholder="e.g. Emerald Diamond Choker (24.5g), Polki Jhumkas (14.2g), Antique Kada pair (23.7g)..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded text-neutral-800 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Submit Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#e2e8f0]">
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 transition-colors cursor-pointer"
+                  className="px-3 py-1.5 border border-[#e2e8f0] text-neutral-600 rounded font-medium hover:bg-neutral-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-2xs cursor-pointer"
+                  disabled={saving}
+                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium shadow-2xs flex items-center gap-1.5 disabled:opacity-50"
                 >
-                  Issue Challan
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  <span>{saving ? 'Generating...' : 'Issue Delivery Challan'}</span>
                 </button>
               </div>
             </form>
@@ -552,67 +628,123 @@ export function SalesDeliveryChallansView() {
         </div>
       )}
 
-      {/* Reconcile Challan Modal */}
-      {isReconcileModalOpen && selectedChallan && (
-        <div className="fixed inset-0 bg-neutral-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full border border-[#e2e8f0] overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-[#e5e7eb] flex items-center justify-between bg-[#f8fafc]">
-              <div className="flex items-center gap-2">
-                <Truck className="w-4 h-4 text-emerald-600" />
-                <h3 className="text-sm font-medium text-neutral-900">
-                  Reconcile Challan {selectedChallan.challan_no}
-                </h3>
+      {/* VIEW / PRINT GATE PASS MODAL */}
+      {isViewModalOpen && selectedChallan && (
+        <div className="fixed inset-0 z-50 bg-neutral-900/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-2xl max-w-xl w-full p-6 border border-[#e2e8f0] animate-fadeIn text-xs max-h-[92vh] overflow-y-auto custom-scrollbar">
+            <div className="flex items-center justify-between pb-3 border-b border-[#e2e8f0] mb-4">
+              <div>
+                <h2 className="text-base font-medium text-neutral-800">OUTWARD DELIVERY CHALLAN & GATE PASS</h2>
+                <p className="text-[11px] text-neutral-500">Challan #{selectedChallan.challan_no} • Security Seal #{selectedChallan.security_seal_no}</p>
               </div>
               <button
-                onClick={() => setIsReconcileModalOpen(false)}
-                className="text-neutral-400 hover:text-neutral-600 p-1"
+                type="button"
+                onClick={() => setIsViewModalOpen(false)}
+                className="p-1 rounded text-neutral-400 hover:text-neutral-700"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-5 font-mono text-xs space-y-3">
-              <div className="p-3 bg-neutral-50 border border-neutral-200 rounded">
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">Destination:</span>
-                  <span className="font-medium text-neutral-800">{selectedChallan.destination}</span>
-                </div>
-                <div className="flex justify-between mt-1">
-                  <span className="text-neutral-500">Total Dispatched:</span>
-                  <span>{selectedChallan.total_items} items ({selectedChallan.total_weight_g.toFixed(3)}g)</span>
-                </div>
-                <div className="flex justify-between mt-1">
-                  <span className="text-neutral-500">Approval Value:</span>
-                  <span>₹ {selectedChallan.approval_value.toLocaleString('en-IN')}</span>
-                </div>
+            <div className="grid grid-cols-2 gap-3 pb-3 border-b border-[#e2e8f0] text-[11px]">
+              <div>
+                <span className="text-neutral-400 block font-medium">Destination:</span>
+                <span className="font-medium text-neutral-800">{selectedChallan.destination}</span>
               </div>
-
-              <div className="text-[11px] text-neutral-600">
-                Please confirm the reconciliation outcome after weighing and inspecting items returned to showroom:
+              <div className="text-right">
+                <span className="text-neutral-400 block font-medium">Return Due Date:</span>
+                <span className="font-mono text-neutral-700">{selectedChallan.return_due_date}</span>
               </div>
-
-              <div className="grid grid-cols-2 gap-2 pt-2">
-                <button
-                  onClick={() => handleReconcileSubmit('FULLY_RETURNED')}
-                  className="px-3 py-2 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-2xs cursor-pointer text-center"
-                >
-                  All Items Returned (100% Restock)
-                </button>
-                <button
-                  onClick={() => handleReconcileSubmit('PARTIALLY_SOLD')}
-                  className="px-3 py-2 rounded-md text-xs font-medium bg-purple-600 text-white hover:bg-purple-700 transition-colors shadow-2xs cursor-pointer text-center"
-                >
-                  Partially Sold (Convert remainder to POS)
-                </button>
+              <div>
+                <span className="text-neutral-400 block font-medium">Recipient:</span>
+                <span className="font-medium text-neutral-800">{selectedChallan.recipient_name}</span>
+                <div className="text-neutral-500 font-mono">{selectedChallan.recipient_phone}</div>
+              </div>
+              <div className="text-right">
+                <span className="text-neutral-400 block font-medium">Custodian / Escort:</span>
+                <span className="font-medium text-emerald-800">{selectedChallan.custodian}</span>
               </div>
             </div>
 
-            <div className="px-5 py-3 border-t border-[#e5e7eb] bg-[#f8fafc] flex justify-end">
+            <div className="py-3 border-b border-[#e2e8f0] space-y-1.5 text-[11px]">
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Total Items Dispatched</span>
+                <span className="font-mono font-medium text-neutral-800">{selectedChallan.total_items} Pcs</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Physical Scale Weight</span>
+                <span className="font-mono font-medium text-neutral-800">{selectedChallan.total_weight_g?.toFixed(3)}g</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Transit Insurance Value</span>
+                <span className="font-mono font-medium text-emerald-700">
+                  ₹{selectedChallan.approval_value?.toLocaleString('en-IN')}
+                </span>
+              </div>
+              {selectedChallan.notes && (
+                <div className="pt-2 border-t border-[#e2e8f0]">
+                  <span className="text-neutral-500 block mb-0.5">Itemized List:</span>
+                  <p className="text-neutral-800 bg-neutral-50 p-2 rounded border border-[#e2e8f0]">
+                    {selectedChallan.notes}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 flex items-center justify-between">
+              <span className="text-[10px] text-neutral-400">
+                Official Delivery Gate Pass • Insured Jewellery in Transit
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsViewModalOpen(false)}
+                  className="px-3 py-1.5 border border-[#e2e8f0] rounded text-neutral-600 hover:bg-neutral-50 font-medium"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium flex items-center gap-1.5"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Gate Pass</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 bg-neutral-900/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-4 border border-[#e2e8f0] animate-fadeIn text-xs">
+            <h3 className="font-medium text-neutral-800 text-sm mb-2">Delete Delivery Challan?</h3>
+            <p className="text-neutral-500 mb-4">
+              Are you sure you want to delete this delivery challan? This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
               <button
-                onClick={() => setIsReconcileModalOpen(false)}
-                className="px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 transition-colors cursor-pointer"
+                type="button"
+                onClick={() => setDeleteConfirmId(null)}
+                className="px-3 py-1.5 border border-[#e2e8f0] text-neutral-600 rounded font-medium hover:bg-neutral-50"
               >
-                Close
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingId === deleteConfirmId}
+                onClick={() => handleDeleteChallan(deleteConfirmId)}
+                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-medium flex items-center gap-1"
+              >
+                {deletingId === deleteConfirmId ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3 h-3" />
+                )}
+                <span>Delete</span>
               </button>
             </div>
           </div>

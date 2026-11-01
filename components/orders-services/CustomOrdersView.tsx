@@ -1,6 +1,16 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
+import { db } from '@/lib/firebase';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+} from 'firebase/firestore';
 import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
 import {
@@ -29,9 +39,17 @@ import {
   ExternalLink,
   Printer,
   Copy,
+  Trash2,
+  Loader2,
+  ArrowRight,
+  Receipt,
+  Truck,
+  Wrench,
+  RefreshCw,
+  User,
 } from 'lucide-react';
 
-interface CustomJewelleryOrder {
+export interface CustomJewelleryOrder {
   id: string;
   order_code: string;
   customer_name: string;
@@ -43,7 +61,7 @@ interface CustomJewelleryOrder {
   karat: string;
   target_weight_g: number;
   expected_date: string;
-  production_stage: '3D_CAD_APPROVED' | 'CASTING' | 'STONE_SETTING' | 'POLISHING' | 'READY_FOR_DELIVERY';
+  production_stage: '3D_CAD_APPROVED' | 'CASTING' | 'STONE_SETTING' | 'POLISHING' | 'QC_PASSED' | 'READY_FOR_DELIVERY' | 'DELIVERED';
   advance_deposit: number;
   estimated_total: number;
   gold_rate_policy: 'LOCKED' | 'FLOATING';
@@ -59,11 +77,12 @@ interface CustomJewelleryOrder {
   cad_file_name: string;
   cad_approved_by_client: boolean;
   notes: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
-const INITIAL_CUSTOM_ORDERS: CustomJewelleryOrder[] = [
+const SAMPLE_ORDERS_SEED: Omit<CustomJewelleryOrder, 'id'>[] = [
   {
-    id: '11223344-e5f6-a1b2-c3d4-445566778899',
     order_code: 'BESPOKE-104',
     customer_name: 'Tanvi Agarwal',
     customer_phone: '+91 98201 44521',
@@ -72,7 +91,7 @@ const INITIAL_CUSTOM_ORDERS: CustomJewelleryOrder[] = [
     ornament_type: 'Cocktail Ring',
     metal_type: 'Yellow Gold',
     karat: '18K Diamond',
-    target_weight_g: 8.500,
+    target_weight_g: 8.5,
     expected_date: '2026-11-15',
     production_stage: '3D_CAD_APPROVED',
     advance_deposit: 150000,
@@ -90,9 +109,9 @@ const INITIAL_CUSTOM_ORDERS: CustomJewelleryOrder[] = [
     cad_file_name: 'tanvi_ring_v3_final.step',
     cad_approved_by_client: true,
     notes: 'Client requested knife-edge band with inner laser engraving "T & R 2026"',
+    created_at: '2026-10-25',
   },
   {
-    id: '22334455-f6a1-b2c3-d4e5-556677889900',
     order_code: 'BESPOKE-105',
     customer_name: 'Meera Nambiar',
     customer_phone: '+91 98402 78192',
@@ -101,7 +120,7 @@ const INITIAL_CUSTOM_ORDERS: CustomJewelleryOrder[] = [
     ornament_type: 'Temple Necklace',
     metal_type: 'Yellow Gold',
     karat: '22K 916',
-    target_weight_g: 64.200,
+    target_weight_g: 64.2,
     expected_date: '2026-11-22',
     production_stage: 'CASTING',
     advance_deposit: 300000,
@@ -113,15 +132,15 @@ const INITIAL_CUSTOM_ORDERS: CustomJewelleryOrder[] = [
       center_stone: 'Uncut Polki Diamond Medallion',
       accent_stones: 'Burmese Ruby Cabochons & Basra Seed Pearls',
       diamond_count: 24,
-      diamond_weight_cts: 2.10,
+      diamond_weight_cts: 2.1,
     },
     priority: 'HIGH_PRIORITY_BRIDAL',
     cad_file_name: 'meera_temple_haar_master.stl',
     cad_approved_by_client: true,
     notes: 'Intricate nakshi work depicting Lakshmi seated on lotus with dual peacocks.',
+    created_at: '2026-10-26',
   },
   {
-    id: '33445566-a1b2-c3d4-e5f6-667788990011',
     order_code: 'BESPOKE-106',
     customer_name: 'Kavita Reddy',
     customer_phone: '+91 99081 22345',
@@ -130,7 +149,7 @@ const INITIAL_CUSTOM_ORDERS: CustomJewelleryOrder[] = [
     ornament_type: 'Bridal Kada Pair',
     metal_type: 'Yellow Gold',
     karat: '22K 916',
-    target_weight_g: 82.400,
+    target_weight_g: 82.4,
     expected_date: '2026-11-28',
     production_stage: 'STONE_SETTING',
     advance_deposit: 400000,
@@ -142,15 +161,15 @@ const INITIAL_CUSTOM_ORDERS: CustomJewelleryOrder[] = [
       center_stone: 'Twin Natural Pear Rubies (Eyes)',
       accent_stones: '120 Round Diamonds VS-GH Accents',
       diamond_count: 120,
-      diamond_weight_cts: 3.40,
+      diamond_weight_cts: 3.4,
     },
     priority: 'HIGH_PRIORITY_BRIDAL',
     cad_file_name: 'reddy_peacock_kada_pair.obj',
     cad_approved_by_client: true,
     notes: 'Screw lock clasp mechanism with safety chain attachment requested.',
+    created_at: '2026-10-27',
   },
   {
-    id: '44556677-b2c3-d4e5-f6a1-778899001122',
     order_code: 'BESPOKE-107',
     customer_name: 'Ananya Joshi',
     customer_phone: '+91 97654 31209',
@@ -159,9 +178,9 @@ const INITIAL_CUSTOM_ORDERS: CustomJewelleryOrder[] = [
     ornament_type: 'Solitaire Ring',
     metal_type: 'Platinum',
     karat: 'Pt 950',
-    target_weight_g: 5.600,
+    target_weight_g: 5.6,
     expected_date: '2026-11-08',
-    production_stage: 'POLISHING',
+    production_stage: 'READY_FOR_DELIVERY',
     advance_deposit: 250000,
     estimated_total: 510000,
     gold_rate_policy: 'LOCKED',
@@ -177,154 +196,233 @@ const INITIAL_CUSTOM_ORDERS: CustomJewelleryOrder[] = [
     cad_file_name: 'ananya_solitaire_ring_pt.step',
     cad_approved_by_client: true,
     notes: 'Express rush order for destination wedding in Udaipur on Nov 10.',
+    created_at: '2026-10-28',
   },
-  {
-    id: '55667788-c3d4-e5f6-a1b2-889900112233',
-    order_code: 'BESPOKE-108',
-    customer_name: 'Priya Sharma',
-    customer_phone: '+91 98110 99882',
-    customer_email: 'priya.sharma@delhi.org',
-    description: 'Choker with Russian emerald beads and rose cut diamonds',
-    ornament_type: 'Choker Necklace',
-    metal_type: 'Rose Gold',
-    karat: '18K Diamond',
-    target_weight_g: 45.100,
-    expected_date: '2026-12-05',
-    production_stage: 'READY_FOR_DELIVERY',
-    advance_deposit: 500000,
-    estimated_total: 980000,
-    gold_rate_policy: 'LOCKED',
-    locked_gold_rate: 7850,
-    gemstone_specs: {
-      setting_style: 'Collet and Prong Hybrid',
-      center_stone: 'Tumbled Colombian Emerald Beads (120 cts)',
-      accent_stones: '64 Rose Cut Diamonds VS',
-      diamond_count: 64,
-      diamond_weight_cts: 4.80,
-    },
-    priority: 'STANDARD',
-    cad_file_name: 'sharma_emerald_choker.step',
-    cad_approved_by_client: true,
-    notes: 'Final quality inspection and BIS Hallmarking complete. Velvet box prepared.',
-  },
-];
-
-const CUSTOMER_OPTIONS = [
-  { name: 'Tanvi Agarwal', phone: '+91 98201 44521', email: 'tanvi.agarwal@example.com' },
-  { name: 'Meera Nambiar', phone: '+91 98402 78192', email: 'meera.nambiar@domain.org' },
-  { name: 'Kavita Reddy', phone: '+91 99081 22345', email: 'kavita.reddy@hyderabad.in' },
-  { name: 'Ananya Joshi', phone: '+91 97654 31209', email: 'ananya.joshi@pune.co' },
-  { name: 'Priya Sharma', phone: '+91 98110 99882', email: 'priya.sharma@delhi.org' },
-  { name: 'Dr. Sunita Rao', phone: '+91 94480 11234', email: 'sunita.rao@clinic.in' },
-  { name: 'Bhavna Parekh', phone: '+91 98212 90811', email: 'bhavna.parekh@gmail.com' },
 ];
 
 export function OrdersCustomOrdersView() {
-  const [orders, setOrders] = useState<CustomJewelleryOrder[]>(INITIAL_CUSTOM_ORDERS);
+  const [orders, setOrders] = useState<CustomJewelleryOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'data' | 'definition'>('data');
   const [searchQuery, setSearchQuery] = useState('');
   const [stageFilter, setStageFilter] = useState<string>('ALL');
   const [isNewOrderOpen, setIsNewOrderOpen] = useState(false);
   const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<CustomJewelleryOrder | null>(null);
-  const [smsNotificationStatus, setSmsNotificationStatus] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // New Bespoke Order Form State
-  const [formOrderCode, setFormOrderCode] = useState(`BESPOKE-${orders.length + 105}`);
-  const [formCustomerName, setFormCustomerName] = useState(CUSTOMER_OPTIONS[0].name);
-  const [formCustomerPhone, setFormCustomerPhone] = useState(CUSTOMER_OPTIONS[0].phone);
-  const [formCustomerEmail, setFormCustomerEmail] = useState(CUSTOMER_OPTIONS[0].email);
+  // Toast feedback state
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'idle'>('idle');
+
+  // Form State
+  const [formOrderCode, setFormOrderCode] = useState('');
+  const [formCustomerName, setFormCustomerName] = useState('Tanvi Agarwal');
+  const [formCustomerPhone, setFormCustomerPhone] = useState('+91 98201 44521');
+  const [formCustomerEmail, setFormCustomerEmail] = useState('tanvi.agarwal@example.com');
   const [formOrnamentType, setFormOrnamentType] = useState('Cocktail Ring');
   const [formDescription, setFormDescription] = useState('Emerald cut cocktail ring with halo diamonds');
   const [formMetalType, setFormMetalType] = useState('Yellow Gold');
   const [formKarat, setFormKarat] = useState('18K Diamond');
-  const [formGrossWeight, setFormGrossWeight] = useState('12.500');
-  const [formExpectedDate, setFormExpectedDate] = useState('2026-11-30');
+  const [formGrossWeight, setFormGrossWeight] = useState('8.500');
+  const [formExpectedDate, setFormExpectedDate] = useState('2026-11-25');
   const [formAdvanceDeposit, setFormAdvanceDeposit] = useState('150000');
-  const [formEstimatedTotal, setFormEstimatedTotal] = useState('450000');
+  const [formEstimatedTotal, setFormEstimatedTotal] = useState('425000');
   const [formRatePolicy, setFormRatePolicy] = useState<'LOCKED' | 'FLOATING'>('LOCKED');
   const [formLockedRate, setFormLockedRate] = useState('7850');
   const [formSettingStyle, setFormSettingStyle] = useState('Prong & Bezel Halo');
-  const [formCenterStone, setFormCenterStone] = useState('Center 1.20ct Natural Emerald');
-  const [formAccentStones, setFormAccentStones] = useState('48 Solitaire VVS Accents (0.80 cts)');
+  const [formCenterStone, setFormCenterStone] = useState('Natural Colombian Emerald 1.45ct');
+  const [formAccentStones, setFormAccentStones] = useState('48 Round Brilliant Diamonds VVS-EF');
+  const [formDiamondCount, setFormDiamondCount] = useState('48');
+  const [formDiamondWeightCts, setFormDiamondWeightCts] = useState('0.65');
   const [formPriority, setFormPriority] = useState<'STANDARD' | 'HIGH_PRIORITY_BRIDAL' | 'RUSH'>('HIGH_PRIORITY_BRIDAL');
-  const [formNotes, setFormNotes] = useState('Client wants CAD render preview sent via WhatsApp before wax printing.');
-  const [cadAttachedFileName, setCadAttachedFileName] = useState<string>('cad_model_preview_v1.step');
+  const [formNotes, setFormNotes] = useState('Laser engraving requested on inner shank.');
+  const [cadAttachedFileName, setCadAttachedFileName] = useState<string>('custom_cad_preview_v1.step');
 
-  // Customer dropdown selection sync
-  const handleCustomerSelect = (name: string) => {
-    setFormCustomerName(name);
-    const found = CUSTOMER_OPTIONS.find((c) => c.name === name);
-    if (found) {
-      setFormCustomerPhone(found.phone);
-      setFormCustomerEmail(found.email);
+  const showToast = (type: 'success' | 'error', msg: string) => {
+    setToastType(type);
+    setToastMessage(msg);
+    setTimeout(() => setToastType('idle'), 4000);
+  };
+
+  const fetchOrders = async () => {
+    try {
+      setLoading(true);
+      const snapshot = await getDocs(collection(db, 'orders_custom'));
+      const list: CustomJewelleryOrder[] = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, ...(d.data() as Omit<CustomJewelleryOrder, 'id'>) });
+      });
+      // Sort newest first
+      list.sort((a, b) => (b.order_code > a.order_code ? 1 : -1));
+      setOrders(list);
+    } catch (err: any) {
+      console.error('Error fetching custom orders:', err);
+      showToast('error', err.message || 'Failed to fetch custom orders');
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Submit new bespoke order
-  const handleCreateOrder = (e: React.FormEvent) => {
+  useEffect(() => {
+    fetchOrders();
+  }, []);
+
+  // Update auto-generated code when modal opens
+  const openNewOrderDrawer = () => {
+    const nextCode = `BESPOKE-${100 + orders.length + 1}`;
+    setFormOrderCode(nextCode);
+    setIsNewOrderOpen(true);
+  };
+
+  // Seed sample records
+  const handleSeedSamples = async () => {
+    try {
+      setSaving(true);
+      const added: CustomJewelleryOrder[] = [];
+      for (const item of SAMPLE_ORDERS_SEED) {
+        const docRef = await addDoc(collection(db, 'orders_custom'), item);
+        added.push({ id: docRef.id, ...item });
+      }
+      setOrders((prev) => [...added, ...prev]);
+      showToast('success', `${added.length} sample bespoke orders loaded into Firestore.`);
+    } catch (err: any) {
+      console.error('Error seeding orders:', err);
+      showToast('error', err.message || 'Failed to seed sample orders');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Create new bespoke order in Firestore
+  const handleCreateOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newOrder: CustomJewelleryOrder = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `bespoke-${Date.now()}`,
-      order_code: formOrderCode,
-      customer_name: formCustomerName,
-      customer_phone: formCustomerPhone,
-      customer_email: formCustomerEmail,
-      description: formDescription,
-      ornament_type: formOrnamentType,
-      metal_type: formMetalType,
-      karat: formKarat,
-      target_weight_g: parseFloat(formGrossWeight) || 10.0,
-      expected_date: formExpectedDate,
-      production_stage: '3D_CAD_APPROVED',
-      advance_deposit: parseFloat(formAdvanceDeposit) || 0,
-      estimated_total: parseFloat(formEstimatedTotal) || 0,
-      gold_rate_policy: formRatePolicy,
-      locked_gold_rate: parseFloat(formLockedRate) || 7850,
-      gemstone_specs: {
-        setting_style: formSettingStyle,
-        center_stone: formCenterStone,
-        accent_stones: formAccentStones,
-        diamond_count: 48,
-        diamond_weight_cts: 0.8,
-      },
-      priority: formPriority,
-      cad_file_name: cadAttachedFileName,
-      cad_approved_by_client: true,
-      notes: formNotes,
-    };
+    try {
+      setSaving(true);
+      const newOrderData: Omit<CustomJewelleryOrder, 'id'> = {
+        order_code: formOrderCode || `BESPOKE-${Date.now().toString().slice(-4)}`,
+        customer_name: formCustomerName,
+        customer_phone: formCustomerPhone,
+        customer_email: formCustomerEmail,
+        description: formDescription,
+        ornament_type: formOrnamentType,
+        metal_type: formMetalType,
+        karat: formKarat,
+        target_weight_g: parseFloat(formGrossWeight) || 10.0,
+        expected_date: formExpectedDate,
+        production_stage: '3D_CAD_APPROVED',
+        advance_deposit: parseFloat(formAdvanceDeposit) || 0,
+        estimated_total: parseFloat(formEstimatedTotal) || 0,
+        gold_rate_policy: formRatePolicy,
+        locked_gold_rate: parseFloat(formLockedRate) || 7850,
+        gemstone_specs: {
+          setting_style: formSettingStyle,
+          center_stone: formCenterStone,
+          accent_stones: formAccentStones,
+          diamond_count: parseInt(formDiamondCount) || 0,
+          diamond_weight_cts: parseFloat(formDiamondWeightCts) || 0,
+        },
+        priority: formPriority,
+        cad_file_name: cadAttachedFileName,
+        cad_approved_by_client: true,
+        notes: formNotes,
+        created_at: new Date().toISOString().slice(0, 10),
+      };
 
-    setOrders([newOrder, ...orders]);
-    setIsNewOrderOpen(false);
-    setFormOrderCode(`BESPOKE-${orders.length + 106}`);
+      const docRef = await addDoc(collection(db, 'orders_custom'), newOrderData);
+      setOrders([{ id: docRef.id, ...newOrderData }, ...orders]);
+      setIsNewOrderOpen(false);
+      showToast('success', `Bespoke Order ${newOrderData.order_code} created successfully.`);
+    } catch (err: any) {
+      console.error('Error creating order:', err);
+      showToast('error', err.message || 'Failed to create order');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleSendMilestoneSms = (order: CustomJewelleryOrder) => {
-    setSmsNotificationStatus(`Milestone SMS sent to ${order.customer_phone} (${order.customer_name})`);
-    setTimeout(() => {
-      setSmsNotificationStatus(null);
-    }, 4000);
+  // Update production stage in Firestore
+  const handleUpdateStage = async (orderId: string, newStage: CustomJewelleryOrder['production_stage']) => {
+    try {
+      await updateDoc(doc(db, 'orders_custom', orderId), {
+        production_stage: newStage,
+        updated_at: new Date().toISOString(),
+      });
+      setOrders((prev) =>
+        prev.map((ord) => (ord.id === orderId ? { ...ord, production_stage: newStage } : ord))
+      );
+      if (selectedOrderForDetail && selectedOrderForDetail.id === orderId) {
+        setSelectedOrderForDetail((prev) => (prev ? { ...prev, production_stage: newStage } : null));
+      }
+      showToast('success', `Order stage updated to ${newStage.replace(/_/g, ' ')}`);
+    } catch (err: any) {
+      console.error('Error updating stage:', err);
+      showToast('error', err.message || 'Failed to update order stage');
+    }
   };
+
+  // Delete order from Firestore
+  const handleDeleteOrder = async (orderId: string) => {
+    if (!confirm('Are you sure you want to permanently delete this bespoke order?')) return;
+    try {
+      setDeletingId(orderId);
+      await deleteDoc(doc(db, 'orders_custom', orderId));
+      setOrders((prev) => prev.filter((ord) => ord.id !== orderId));
+      if (selectedOrderForDetail?.id === orderId) {
+        setSelectedOrderForDetail(null);
+      }
+      showToast('success', 'Custom order removed successfully.');
+    } catch (err: any) {
+      console.error('Error deleting order:', err);
+      showToast('error', err.message || 'Failed to delete custom order');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  // Purity conversion calculations
+  const purityFactor = useMemo(() => {
+    if (formKarat.includes('22K')) return 0.916;
+    if (formKarat.includes('18K')) return 0.75;
+    if (formKarat.includes('14K')) return 0.585;
+    if (formKarat.includes('Pt')) return 0.95;
+    return 1.0;
+  }, [formKarat]);
+
+  const targetWeightNum = parseFloat(formGrossWeight) || 0;
+  const lockedRateNum = parseFloat(formLockedRate) || 0;
+  const advanceDepositNum = parseFloat(formAdvanceDeposit) || 0;
+  const estimatedTotalNum = parseFloat(formEstimatedTotal) || 0;
+
+  const estimatedMetalCost = targetWeightNum * lockedRateNum;
+  const balanceRemaining = Math.max(0, estimatedTotalNum - advanceDepositNum);
+  const pureMetalEquiv = (targetWeightNum * purityFactor).toFixed(3);
 
   // Filtered orders
   const filteredOrders = useMemo(() => {
     return orders.filter((ord) => {
       const matchesSearch =
-        ord.order_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        ord.customer_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        ord.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        ord.ornament_type.toLowerCase().includes(searchQuery.toLowerCase());
+        (ord.order_code || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (ord.customer_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (ord.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (ord.ornament_type || '').toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStage = stageFilter === 'ALL' || ord.production_stage === stageFilter;
       return matchesSearch && matchesStage;
     });
   }, [orders, searchQuery, stageFilter]);
 
-  // Stage badge styler
+  // Aggregate metrics
+  const activeOrdersCount = orders.filter((o) => o.production_stage !== 'DELIVERED').length;
+  const totalBespokeValue = orders.reduce((acc, o) => acc + (o.estimated_total || 0), 0);
+  const totalAdvanceReceived = orders.reduce((acc, o) => acc + (o.advance_deposit || 0), 0);
+  const readyOrdersCount = orders.filter((o) => o.production_stage === 'READY_FOR_DELIVERY').length;
+
   const getStageBadge = (stage: CustomJewelleryOrder['production_stage']) => {
     switch (stage) {
       case '3D_CAD_APPROVED':
         return (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
-            <Layers className="w-3 h-3 text-blue-600" /> 3D CAD Approved
+            <Layers className="w-3 h-3 text-blue-600" /> CAD Approved
           </span>
         );
       case 'CASTING':
@@ -335,8 +433,8 @@ export function OrdersCustomOrdersView() {
         );
       case 'STONE_SETTING':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
-            <Gem className="w-3 h-3 text-amber-600" /> Stone Setting
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-purple-50 text-purple-700 border border-purple-200">
+            <Gem className="w-3 h-3 text-purple-600" /> Stone Setting
           </span>
         );
       case 'POLISHING':
@@ -345,10 +443,22 @@ export function OrdersCustomOrdersView() {
             <Sparkles className="w-3 h-3 text-amber-600" /> Polishing & Buffing
           </span>
         );
+      case 'QC_PASSED':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-teal-50 text-teal-700 border border-teal-200">
+            <ShieldCheck className="w-3 h-3 text-teal-600" /> QC Passed
+          </span>
+        );
       case 'READY_FOR_DELIVERY':
         return (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
             <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Ready for Delivery
+          </span>
+        );
+      case 'DELIVERED':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-neutral-100 text-neutral-600 border border-neutral-200">
+            <Check className="w-3 h-3 text-neutral-500" /> Delivered
           </span>
         );
       default:
@@ -360,23 +470,93 @@ export function OrdersCustomOrdersView() {
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0">
       <TabBar title="custom_jewellery_orders" />
       <ActionToolbar
-        filterPlaceholder="Filter bespoke orders by client, order code, stone type..."
+        filterPlaceholder="Filter bespoke orders by patron, order code, ornament..."
         insertLabel="New Bespoke Order"
-        onInsertClick={() => setIsNewOrderOpen(true)}
+        onInsertClick={openNewOrderDrawer}
       />
+
+      {/* Interlinked Module Navigation Header */}
+      <div className="bg-white border-b border-[#e2e8f0] px-4 py-2 flex items-center justify-between gap-2 overflow-x-auto no-scrollbar text-xs">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider mr-1">Workflow:</span>
+          <Link
+            href="/orders-services/custom-orders"
+            className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 font-medium border border-emerald-200 flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <Sparkles className="w-3 h-3 text-emerald-600" /> Custom Orders
+          </Link>
+          <Link
+            href="/orders-services/tracking"
+            className="px-2.5 py-1 rounded hover:bg-neutral-100 text-neutral-600 font-medium border border-[#e2e8f0] flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <Layers className="w-3 h-3 text-neutral-500" /> Production Pipeline
+          </Link>
+          <Link
+            href="/orders-services/repairs"
+            className="px-2.5 py-1 rounded hover:bg-neutral-100 text-neutral-600 font-medium border border-[#e2e8f0] flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <Wrench className="w-3 h-3 text-neutral-500" /> Repairs
+          </Link>
+          <Link
+            href="/orders-services/job-work"
+            className="px-2.5 py-1 rounded hover:bg-neutral-100 text-neutral-600 font-medium border border-[#e2e8f0] flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <Scale className="w-3 h-3 text-neutral-500" /> Job Work
+          </Link>
+          <Link
+            href="/orders-services/goldsmith-ledger"
+            className="px-2.5 py-1 rounded hover:bg-neutral-100 text-neutral-600 font-medium border border-[#e2e8f0] flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <FileText className="w-3 h-3 text-neutral-500" /> Karigar Ledger
+          </Link>
+          <Link
+            href="/orders-services/delivery-management"
+            className="px-2.5 py-1 rounded hover:bg-neutral-100 text-neutral-600 font-medium border border-[#e2e8f0] flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <Truck className="w-3 h-3 text-neutral-500" /> Secure Delivery
+          </Link>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <Link
+            href="/sales/billing-pos"
+            className="px-2 py-1 rounded text-[11px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors flex items-center gap-1 shadow-2xs"
+          >
+            <Receipt className="w-3 h-3" /> Go to POS Billing
+          </Link>
+          <button
+            onClick={fetchOrders}
+            disabled={loading}
+            className="p-1 rounded text-neutral-500 hover:text-emerald-700 hover:bg-neutral-100 transition-colors cursor-pointer"
+            title="Refresh Orders"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-emerald-600' : ''}`} />
+          </button>
+        </div>
+      </div>
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto bg-[#fafafa] flex flex-col custom-scrollbar w-full">
-        {/* SMS Notification Banner */}
-        {smsNotificationStatus && (
-          <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-2 text-xs font-medium text-emerald-800 flex items-center justify-between animate-fadeIn">
+        {/* Toast Feedback */}
+        {toastType !== 'idle' && (
+          <div
+            className={`border-b px-4 py-2 text-xs font-medium flex items-center justify-between animate-fadeIn ${
+              toastType === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}
+          >
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-              <span>{smsNotificationStatus}</span>
+              {toastType === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-red-600" />
+              )}
+              <span>{toastMessage}</span>
             </div>
             <button
-              onClick={() => setSmsNotificationStatus(null)}
-              className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
+              onClick={() => setToastType('idle')}
+              className="text-neutral-500 hover:text-neutral-800 cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -388,15 +568,17 @@ export function OrdersCustomOrdersView() {
           <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[11px] font-medium text-neutral-500 uppercase tracking-wider">
-                Active Custom Orders
+                Active Bespoke Orders
               </span>
               <span className="p-1 rounded bg-blue-50 text-blue-600">
                 <Sparkles className="w-3.5 h-3.5" />
               </span>
             </div>
-            <div className="text-xl font-medium text-neutral-800 font-mono">24 Bespoke</div>
+            <div className="text-xl font-medium text-neutral-800 font-mono">
+              {activeOrdersCount} Bespoke
+            </div>
             <div className="text-[11px] text-neutral-500 mt-1 flex items-center gap-1">
-              <span className="text-emerald-600 font-medium">↑ 4 new</span> this week
+              <span className="text-emerald-600 font-medium">{orders.length} total</span> in database
             </div>
           </div>
 
@@ -409,44 +591,57 @@ export function OrdersCustomOrdersView() {
                 <DollarSign className="w-3.5 h-3.5" />
               </span>
             </div>
-            <div className="text-xl font-medium text-neutral-800 font-mono">₹ 82.40 Lakhs</div>
+            <div className="text-xl font-medium text-neutral-800 font-mono">
+              ₹ {(totalBespokeValue / 100000).toFixed(2)} Lakhs
+            </div>
             <div className="text-[11px] text-neutral-500 mt-1 flex items-center gap-1">
-              <span className="text-neutral-700 font-medium">₹ 38.50 L</span> advance deposited
+              <span className="text-neutral-700 font-medium">
+                ₹ {(totalAdvanceReceived / 100000).toFixed(2)} L
+              </span>{' '}
+              advance deposited
             </div>
           </div>
 
           <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[11px] font-medium text-neutral-500 uppercase tracking-wider">
-                Pending CAD Sign-offs
+                Ready for Final POS Billing
               </span>
-              <span className="p-1 rounded bg-amber-50 text-amber-600">
-                <Layers className="w-3.5 h-3.5" />
+              <span className="p-1 rounded bg-emerald-50 text-emerald-600">
+                <Receipt className="w-3.5 h-3.5" />
               </span>
             </div>
-            <div className="text-xl font-medium text-neutral-800 font-mono">4 Designs</div>
-            <div className="text-[11px] text-amber-700 mt-1 flex items-center gap-1">
-              <AlertCircle className="w-3 h-3 text-amber-500" /> Awaiting patron WhatsApp approval
+            <div className="text-xl font-medium text-emerald-700 font-mono">
+              {readyOrdersCount} Finished
+            </div>
+            <div className="text-[11px] text-neutral-500 mt-1 flex items-center gap-1">
+              <Link href="/sales/billing-pos" className="text-emerald-700 hover:underline flex items-center gap-0.5">
+                Convert to Tax Invoice <ChevronRight className="w-3 h-3" />
+              </Link>
             </div>
           </div>
 
           <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[11px] font-medium text-neutral-500 uppercase tracking-wider">
-                Bridal Sets Due This Month
+                Patron Directory Link
               </span>
               <span className="p-1 rounded bg-purple-50 text-purple-600">
-                <Calendar className="w-3.5 h-3.5" />
+                <User className="w-3.5 h-3.5" />
               </span>
             </div>
-            <div className="text-xl font-medium text-neutral-800 font-mono">8 Packages</div>
+            <div className="text-xl font-medium text-neutral-800 font-mono">
+              CRM Sync
+            </div>
             <div className="text-[11px] text-neutral-500 mt-1 flex items-center gap-1">
-              Wedding deadlines Nov 15 - Nov 30
+              <Link href="/customers/list" className="text-emerald-700 hover:underline flex items-center gap-0.5">
+                Manage Customers & KYC <ChevronRight className="w-3 h-3" />
+              </Link>
             </div>
           </div>
         </div>
 
-        {/* Tab Controls (Data vs Definition) & Stage Filters */}
+        {/* Tab Controls & Stage Filters */}
         <div className="px-4 pb-2 flex flex-wrap items-center justify-between gap-2 border-b border-[#e2e8f0]">
           <div className="flex items-center gap-1">
             <button
@@ -473,8 +668,19 @@ export function OrdersCustomOrdersView() {
 
           {activeTab === 'data' && (
             <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Filter bespoke orders..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 pr-3 py-1 rounded text-xs border border-[#e2e8f0] bg-white focus:outline-none focus:border-emerald-500 w-44"
+                />
+              </div>
+
               <span className="text-[11px] font-medium text-neutral-500">Stage:</span>
-              {['ALL', '3D_CAD_APPROVED', 'CASTING', 'STONE_SETTING', 'POLISHING', 'READY_FOR_DELIVERY'].map((st) => (
+              {['ALL', '3D_CAD_APPROVED', 'CASTING', 'STONE_SETTING', 'POLISHING', 'QC_PASSED', 'READY_FOR_DELIVERY', 'DELIVERED'].map((st) => (
                 <button
                   key={st}
                   onClick={() => setStageFilter(st)}
@@ -488,9 +694,11 @@ export function OrdersCustomOrdersView() {
                     ? 'All Stages'
                     : st === '3D_CAD_APPROVED'
                     ? 'CAD Approved'
+                    : st === 'QC_PASSED'
+                    ? 'QC Passed'
                     : st === 'READY_FOR_DELIVERY'
                     ? 'Ready'
-                    : st.replace('_', ' ')}
+                    : st.replace(/_/g, ' ')}
                 </button>
               ))}
             </div>
@@ -500,103 +708,183 @@ export function OrdersCustomOrdersView() {
         {/* View Mode: Data Table */}
         {activeTab === 'data' ? (
           <div className="flex-1 p-4">
-            <div className="bg-white border border-[#e2e8f0] rounded-lg shadow-2xs overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-[#f8fafc] border-b border-[#e2e8f0] text-neutral-500 font-medium">
-                      <th className="py-2.5 px-3 w-8 text-center border-r border-[#e5e7eb]">
-                        <input type="checkbox" className="rounded border-neutral-300 text-emerald-600" />
-                      </th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">Order Code</th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">Patron Name</th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb]">Bespoke Ornament & Karat</th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap">Target Wt (g)</th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">Due Date</th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">Production Stage</th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap">Advance / Total</th>
-                      <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-center whitespace-nowrap">Rate Policy</th>
-                      <th className="py-2.5 px-3 text-center whitespace-nowrap">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#f1f5f9]">
-                    {filteredOrders.map((ord) => (
-                      <tr key={ord.id} className="hover:bg-[#f8fafc] transition-colors">
-                        <td className="py-2.5 px-3 text-center border-r border-[#e5e7eb]">
-                          <input type="checkbox" className="rounded border-neutral-300 text-emerald-600" />
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap font-mono">
-                          <div className="font-medium text-emerald-700 flex items-center gap-1">
-                            <span>{ord.order_code}</span>
-                            {ord.priority === 'HIGH_PRIORITY_BRIDAL' && (
-                              <span className="text-[9px] bg-red-50 text-red-600 px-1 py-0.2 rounded border border-red-200">
-                                Bridal
-                              </span>
-                            )}
-                            {ord.priority === 'RUSH' && (
-                              <span className="text-[9px] bg-amber-50 text-amber-700 px-1 py-0.2 rounded border border-amber-200">
-                                Rush
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[10px] text-neutral-400 block">{ord.cad_file_name}</span>
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">
-                          <div className="font-medium text-neutral-800">{ord.customer_name}</div>
-                          <div className="text-[10px] text-neutral-400 font-mono">{ord.customer_phone}</div>
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb]">
-                          <div className="font-medium text-neutral-800 line-clamp-1">{ord.description}</div>
-                          <div className="text-[10px] text-neutral-500 flex items-center gap-2 mt-0.5">
-                            <span className="font-mono text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
-                              {ord.karat}
-                            </span>
-                            <span>{ord.gemstone_specs.center_stone}</span>
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono font-medium text-neutral-800 whitespace-nowrap">
-                          {ord.target_weight_g.toFixed(3)} g
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap font-mono text-neutral-700">
-                          {ord.expected_date}
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">
-                          {getStageBadge(ord.production_stage)}
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono whitespace-nowrap">
-                          <div className="font-medium text-emerald-700">
-                            ₹ {ord.advance_deposit.toLocaleString('en-IN')}
-                          </div>
-                          <div className="text-[10px] text-neutral-400">
-                            / ₹ {ord.estimated_total.toLocaleString('en-IN')}
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-center whitespace-nowrap">
-                          {ord.gold_rate_policy === 'LOCKED' ? (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              Locked @ ₹{ord.locked_gold_rate}
-                            </span>
-                          ) : (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-neutral-100 text-neutral-600 border border-neutral-200">
-                              Floating Rate
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                          <button
-                            onClick={() => setSelectedOrderForDetail(ord)}
-                            className="p-1 hover:bg-neutral-100 rounded text-neutral-600 hover:text-emerald-700 transition-colors cursor-pointer"
-                            title="Inspect 3D CAD & Specs"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {loading ? (
+              <div className="bg-white border border-[#e2e8f0] rounded-lg p-12 flex flex-col items-center justify-center text-center">
+                <Loader2 className="w-8 h-8 text-emerald-600 animate-spin mb-3" />
+                <h3 className="text-sm font-medium text-neutral-800">Loading Bespoke Orders...</h3>
+                <p className="text-xs text-neutral-500 mt-1">Connecting to Firestore collection &apos;orders_custom&apos;</p>
               </div>
-            </div>
+            ) : filteredOrders.length === 0 ? (
+              <div className="bg-white border border-[#e2e8f0] rounded-lg p-12 flex flex-col items-center justify-center text-center">
+                <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3">
+                  <Sparkles className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-medium text-neutral-800">No Custom Orders Found</h3>
+                <p className="text-xs text-neutral-500 max-w-md mt-1 mb-4">
+                  {searchQuery || stageFilter !== 'ALL'
+                    ? 'No orders matched your search or stage filters.'
+                    : 'There are currently no custom jewellery orders recorded in the live database.'}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={openNewOrderDrawer}
+                    className="px-3.5 py-2 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Create Custom Order
+                  </button>
+                  {orders.length === 0 && (
+                    <button
+                      onClick={handleSeedSamples}
+                      disabled={saving}
+                      className="px-3.5 py-2 rounded-md bg-white border border-[#e2e8f0] text-neutral-700 text-xs font-medium hover:bg-neutral-50 transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" /> : <Layers className="w-3.5 h-3.5 text-blue-600" />}
+                      Load Sample Orders
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white border border-[#e2e8f0] rounded-lg shadow-2xs overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-[#f8fafc] border-b border-[#e2e8f0] text-neutral-500 font-medium">
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">Order Code</th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">Patron Name</th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb]">Bespoke Ornament & Karat</th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap">Target Wt (g)</th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">Due Date</th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">Production Stage</th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-right whitespace-nowrap">Advance / Total</th>
+                        <th className="py-2.5 px-3 border-r border-[#e5e7eb] text-center whitespace-nowrap">Rate Policy</th>
+                        <th className="py-2.5 px-3 text-center whitespace-nowrap">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#f1f5f9]">
+                      {filteredOrders.map((ord) => (
+                        <tr key={ord.id} className="hover:bg-[#f8fafc] transition-colors">
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap font-mono">
+                            <div className="font-medium text-emerald-700 flex items-center gap-1">
+                              <span>{ord.order_code}</span>
+                              {ord.priority === 'HIGH_PRIORITY_BRIDAL' && (
+                                <span className="text-[9px] bg-red-50 text-red-600 px-1 py-0.2 rounded border border-red-200">
+                                  Bridal
+                                </span>
+                              )}
+                              {ord.priority === 'RUSH' && (
+                                <span className="text-[9px] bg-amber-50 text-amber-700 px-1 py-0.2 rounded border border-amber-200">
+                                  Rush
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-neutral-400 block">{ord.cad_file_name}</span>
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">
+                            <div className="flex items-center gap-1">
+                              <span className="font-medium text-neutral-800">{ord.customer_name}</span>
+                              <Link
+                                href="/customers/list"
+                                title="Inspect patron profile in CRM"
+                                className="text-neutral-400 hover:text-emerald-700"
+                              >
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </Link>
+                            </div>
+                            <div className="text-[10px] text-neutral-400 font-mono">{ord.customer_phone}</div>
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb]">
+                            <div className="font-medium text-neutral-800 line-clamp-1">{ord.description}</div>
+                            <div className="text-[10px] text-neutral-500 flex items-center gap-2 mt-0.5">
+                              <span className="font-mono text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                                {ord.karat}
+                              </span>
+                              <span>{ord.gemstone_specs?.center_stone}</span>
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono font-medium text-neutral-800 whitespace-nowrap">
+                            {Number(ord.target_weight_g).toFixed(3)} g
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap font-mono text-neutral-700">
+                            {ord.expected_date}
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] whitespace-nowrap">
+                            <div className="flex items-center gap-1.5">
+                              {getStageBadge(ord.production_stage)}
+                              <select
+                                value={ord.production_stage}
+                                onChange={(e) => handleUpdateStage(ord.id, e.target.value as any)}
+                                className="text-[10px] bg-white border border-[#e2e8f0] rounded px-1 py-0.5 text-neutral-600 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                                title="Fast update stage"
+                              >
+                                <option value="3D_CAD_APPROVED">CAD Approved</option>
+                                <option value="CASTING">Casting</option>
+                                <option value="STONE_SETTING">Setting</option>
+                                <option value="POLISHING">Polishing</option>
+                                <option value="QC_PASSED">QC Passed</option>
+                                <option value="READY_FOR_DELIVERY">Ready</option>
+                                <option value="DELIVERED">Delivered</option>
+                              </select>
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-right font-mono whitespace-nowrap">
+                            <div className="font-medium text-emerald-700">
+                              ₹ {Number(ord.advance_deposit || 0).toLocaleString('en-IN')}
+                            </div>
+                            <div className="text-[10px] text-neutral-400">
+                              / ₹ {Number(ord.estimated_total || 0).toLocaleString('en-IN')}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 border-r border-[#e5e7eb] text-center whitespace-nowrap">
+                            {ord.gold_rate_policy === 'LOCKED' ? (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                Locked @ ₹{ord.locked_gold_rate}
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-neutral-100 text-neutral-600 border border-neutral-200">
+                                Floating Rate
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => setSelectedOrderForDetail(ord)}
+                                className="p-1 hover:bg-neutral-100 rounded text-neutral-600 hover:text-emerald-700 transition-colors cursor-pointer"
+                                title="Inspect 3D CAD & Specs"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                              {ord.production_stage === 'READY_FOR_DELIVERY' && (
+                                <Link
+                                  href={`/sales/billing-pos?custom_order=${ord.order_code}`}
+                                  className="p-1 hover:bg-emerald-50 rounded text-emerald-600 hover:text-emerald-800 transition-colors"
+                                  title="Convert to Final POS Invoice"
+                                >
+                                  <Receipt className="w-3.5 h-3.5" />
+                                </Link>
+                              )}
+                              <button
+                                onClick={() => handleDeleteOrder(ord.id)}
+                                disabled={deletingId === ord.id}
+                                className="p-1 hover:bg-red-50 rounded text-neutral-400 hover:text-red-600 transition-colors cursor-pointer"
+                                title="Delete order"
+                              >
+                                {deletingId === ord.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
+                                ) : (
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           /* Schema Definition Tab */
@@ -659,7 +947,7 @@ export function OrdersCustomOrdersView() {
         )}
       </div>
 
-      {/* Bespoke Detail Modal (CAD Preview Mockup & Gemstone Specs) */}
+      {/* Bespoke Detail Modal (CAD Preview & Specifications) */}
       {selectedOrderForDetail && (
         <div className="fixed inset-0 bg-neutral-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
           <div className="bg-white rounded-lg shadow-xl border border-[#e2e8f0] w-full max-w-2xl max-h-[90vh] overflow-y-auto custom-scrollbar flex flex-col">
@@ -716,7 +1004,7 @@ export function OrdersCustomOrdersView() {
                       {selectedOrderForDetail.cad_file_name}
                     </span>
                     <span className="text-[10px] text-neutral-500 mt-0.5">
-                      Target Weight: {selectedOrderForDetail.target_weight_g.toFixed(3)}g | Karat: {selectedOrderForDetail.karat}
+                      Target Weight: {Number(selectedOrderForDetail.target_weight_g).toFixed(3)}g | Karat: {selectedOrderForDetail.karat}
                     </span>
                   </div>
                   <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between text-[10px] font-mono text-neutral-400 z-10">
@@ -739,26 +1027,26 @@ export function OrdersCustomOrdersView() {
                   <div>
                     <span className="text-neutral-500 block text-[11px]">Setting Style</span>
                     <span className="font-medium text-neutral-800">
-                      {selectedOrderForDetail.gemstone_specs.setting_style}
+                      {selectedOrderForDetail.gemstone_specs?.setting_style || 'Standard Prong'}
                     </span>
                   </div>
                   <div>
                     <span className="text-neutral-500 block text-[11px]">Center Gemstone</span>
                     <span className="font-medium text-emerald-800">
-                      {selectedOrderForDetail.gemstone_specs.center_stone}
+                      {selectedOrderForDetail.gemstone_specs?.center_stone || 'None'}
                     </span>
                   </div>
                   <div>
                     <span className="text-neutral-500 block text-[11px]">Accent Stones</span>
                     <span className="font-medium text-neutral-800">
-                      {selectedOrderForDetail.gemstone_specs.accent_stones}
+                      {selectedOrderForDetail.gemstone_specs?.accent_stones || 'None'}
                     </span>
                   </div>
                   <div>
                     <span className="text-neutral-500 block text-[11px]">Diamond Weight & Count</span>
                     <span className="font-medium text-neutral-800 font-mono">
-                      {selectedOrderForDetail.gemstone_specs.diamond_weight_cts} cts (
-                      {selectedOrderForDetail.gemstone_specs.diamond_count} stones)
+                      {selectedOrderForDetail.gemstone_specs?.diamond_weight_cts || 0} cts (
+                      {selectedOrderForDetail.gemstone_specs?.diamond_count || 0} stones)
                     </span>
                   </div>
                 </div>
@@ -771,50 +1059,72 @@ export function OrdersCustomOrdersView() {
                   <div className="flex justify-between py-1 border-b border-[#f1f5f9]">
                     <span className="text-neutral-600">Advance Received:</span>
                     <span className="font-mono font-medium text-emerald-700">
-                      ₹ {selectedOrderForDetail.advance_deposit.toLocaleString('en-IN')}
+                      ₹ {Number(selectedOrderForDetail.advance_deposit).toLocaleString('en-IN')}
                     </span>
                   </div>
                   <div className="flex justify-between py-1 border-b border-[#f1f5f9]">
                     <span className="text-neutral-600">Total Estimate:</span>
                     <span className="font-mono font-medium text-neutral-800">
-                      ₹ {selectedOrderForDetail.estimated_total.toLocaleString('en-IN')}
+                      ₹ {Number(selectedOrderForDetail.estimated_total).toLocaleString('en-IN')}
                     </span>
                   </div>
                   <div className="flex justify-between py-1 pt-1.5 text-neutral-600">
                     <span>Balance on Delivery:</span>
                     <span className="font-mono font-medium text-amber-700">
-                      ₹ {(selectedOrderForDetail.estimated_total - selectedOrderForDetail.advance_deposit).toLocaleString('en-IN')}
+                      ₹ {(Number(selectedOrderForDetail.estimated_total) - Number(selectedOrderForDetail.advance_deposit)).toLocaleString('en-IN')}
                     </span>
                   </div>
                 </div>
 
                 <div className="p-3 rounded-md bg-white border border-[#e2e8f0] text-xs">
                   <span className="text-[11px] text-neutral-500 block mb-1">Production Stage & Notes</span>
-                  <div className="mb-2">{getStageBadge(selectedOrderForDetail.production_stage)}</div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <div>{getStageBadge(selectedOrderForDetail.production_stage)}</div>
+                    <select
+                      value={selectedOrderForDetail.production_stage}
+                      onChange={(e) => handleUpdateStage(selectedOrderForDetail.id, e.target.value as any)}
+                      className="text-[11px] border border-[#e2e8f0] rounded px-2 py-0.5 bg-white text-neutral-700 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="3D_CAD_APPROVED">CAD Approved</option>
+                      <option value="CASTING">Casting</option>
+                      <option value="STONE_SETTING">Setting</option>
+                      <option value="POLISHING">Polishing</option>
+                      <option value="QC_PASSED">QC Passed</option>
+                      <option value="READY_FOR_DELIVERY">Ready for Delivery</option>
+                      <option value="DELIVERED">Delivered</option>
+                    </select>
+                  </div>
                   <p className="text-[11px] text-neutral-600 italic">
-                    &ldquo;{selectedOrderForDetail.notes}&rdquo;
+                    &ldquo;{selectedOrderForDetail.notes || 'No special notes provided'}&rdquo;
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Modal Actions */}
-            <div className="px-5 py-3 border-t border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-between">
-              <button
-                onClick={() => handleSendMilestoneSms(selectedOrderForDetail)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 transition-colors cursor-pointer"
-              >
-                <Smartphone className="w-3.5 h-3.5 text-blue-600" />
-                <span>Send Milestone SMS / WhatsApp</span>
-              </button>
+            {/* Modal Actions with Quick Interlinks */}
+            <div className="px-5 py-3 border-t border-[#e2e8f0] bg-[#f8fafc] flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setSelectedOrderForDetail(null)}
-                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-neutral-900 text-white hover:bg-neutral-800 transition-colors shadow-2xs cursor-pointer"
+                <Link
+                  href={`/sales/billing-pos?custom_order=${selectedOrderForDetail.order_code}`}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-2xs"
                 >
-                  Close Inspection
-                </button>
+                  <Receipt className="w-3.5 h-3.5" />
+                  <span>Generate Final Invoice</span>
+                </Link>
+                <Link
+                  href="/orders-services/tracking"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 transition-colors"
+                >
+                  <Layers className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Track in Pipeline</span>
+                </Link>
               </div>
+              <button
+                onClick={() => setSelectedOrderForDetail(null)}
+                className="px-3 py-1.5 rounded-md text-xs font-medium bg-neutral-900 text-white hover:bg-neutral-800 transition-colors shadow-2xs cursor-pointer"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
@@ -849,7 +1159,7 @@ export function OrdersCustomOrdersView() {
 
             {/* Drawer Form Body */}
             <form id="new-bespoke-form" onSubmit={handleCreateOrder} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
-              {/* Order Code & Customer Picker */}
+              {/* Order Code & Customer Name */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-neutral-700 mb-1 block">Order Code</label>
@@ -862,44 +1172,66 @@ export function OrdersCustomOrdersView() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Select Patron</label>
-                  <select
+                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Patron Name</label>
+                  <input
+                    type="text"
                     value={formCustomerName}
-                    onChange={(e) => handleCustomerSelect(e.target.value)}
+                    onChange={(e) => setFormCustomerName(e.target.value)}
+                    required
+                    placeholder="Enter customer name"
                     className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 transition-colors"
-                  >
-                    {CUSTOMER_OPTIONS.map((c) => (
-                      <option key={c.name} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
               </div>
 
-              {/* Customer Contact Info Preview */}
-              <div className="grid grid-cols-2 gap-3 bg-[#f8fafc] p-2.5 rounded border border-[#e2e8f0] text-xs">
+              {/* Customer Phone & Email */}
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <span className="text-[10px] text-neutral-500 block">Phone</span>
-                  <span className="font-mono text-neutral-700">{formCustomerPhone}</span>
+                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Phone Number</label>
+                  <input
+                    type="text"
+                    value={formCustomerPhone}
+                    onChange={(e) => setFormCustomerPhone(e.target.value)}
+                    required
+                    placeholder="+91 98..."
+                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono transition-colors"
+                  />
                 </div>
                 <div>
-                  <span className="text-[10px] text-neutral-500 block">Email</span>
-                  <span className="font-mono text-neutral-700">{formCustomerEmail}</span>
+                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Email (Optional)</label>
+                  <input
+                    type="email"
+                    value={formCustomerEmail}
+                    onChange={(e) => setFormCustomerEmail(e.target.value)}
+                    placeholder="patron@domain.com"
+                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 transition-colors"
+                  />
                 </div>
               </div>
 
               {/* Ornament Description & Type */}
-              <div>
-                <label className="text-xs font-medium text-neutral-700 mb-1 block">Ornament Type</label>
-                <input
-                  type="text"
-                  value={formOrnamentType}
-                  onChange={(e) => setFormOrnamentType(e.target.value)}
-                  placeholder="e.g. Cocktail Ring, Temple Haar, Kada Pair"
-                  required
-                  className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 transition-colors"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Ornament Type</label>
+                  <input
+                    type="text"
+                    value={formOrnamentType}
+                    onChange={(e) => setFormOrnamentType(e.target.value)}
+                    placeholder="e.g. Cocktail Ring, Temple Haar, Kada Pair"
+                    required
+                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Expected Delivery Date</label>
+                  <input
+                    type="date"
+                    value={formExpectedDate}
+                    onChange={(e) => setFormExpectedDate(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 transition-colors"
+                  />
+                </div>
               </div>
 
               <div>
@@ -909,6 +1241,7 @@ export function OrdersCustomOrdersView() {
                   value={formDescription}
                   onChange={(e) => setFormDescription(e.target.value)}
                   required
+                  placeholder="Detail bespoke geometry, motifs, enamel work..."
                   className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 transition-colors"
                 />
               </div>
@@ -954,6 +1287,12 @@ export function OrdersCustomOrdersView() {
                 </div>
               </div>
 
+              {/* Dynamic Purity Equivalent Helper */}
+              <div className="bg-[#f0fdf4] border border-emerald-200 rounded-md p-2.5 text-xs text-emerald-800 flex items-center justify-between">
+                <span>Pure 24K Metal Content Equivalent:</span>
+                <span className="font-mono font-medium text-emerald-900">{pureMetalEquiv} g pure</span>
+              </div>
+
               {/* Gemstone Setting Specifications */}
               <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] space-y-3">
                 <div className="text-xs font-medium text-neutral-700 uppercase tracking-wider flex items-center gap-1.5">
@@ -965,7 +1304,7 @@ export function OrdersCustomOrdersView() {
                     type="text"
                     value={formSettingStyle}
                     onChange={(e) => setFormSettingStyle(e.target.value)}
-                    placeholder="e.g. Prong, Micro-Pave, Bezel, Jadau"
+                    placeholder="e.g. Prong, Micro-Pave, Bezel, Kundan Jadau"
                     className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 transition-colors"
                   />
                 </div>
@@ -981,7 +1320,7 @@ export function OrdersCustomOrdersView() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-neutral-700 mb-1 block">Accent Diamonds</label>
+                    <label className="text-xs font-medium text-neutral-700 mb-1 block">Accent Diamonds / Pearls</label>
                     <input
                       type="text"
                       value={formAccentStones}
@@ -991,30 +1330,30 @@ export function OrdersCustomOrdersView() {
                     />
                   </div>
                 </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-neutral-700 mb-1 block">Diamond Stone Count</label>
+                    <input
+                      type="number"
+                      value={formDiamondCount}
+                      onChange={(e) => setFormDiamondCount(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-neutral-700 mb-1 block">Total Diamond Weight (Cts)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formDiamondWeightCts}
+                      onChange={(e) => setFormDiamondWeightCts(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono transition-colors"
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Financials & Gold Rate Policy */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Advance Deposit (₹)</label>
-                  <input
-                    type="number"
-                    value={formAdvanceDeposit}
-                    onChange={(e) => setFormAdvanceDeposit(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Estimated Total (₹)</label>
-                  <input
-                    type="number"
-                    value={formEstimatedTotal}
-                    onChange={(e) => setFormEstimatedTotal(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono transition-colors"
-                  />
-                </div>
-              </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-neutral-700 mb-1 block">Gold Rate Policy</label>
@@ -1039,42 +1378,67 @@ export function OrdersCustomOrdersView() {
                 </div>
               </div>
 
-              {/* Delivery Date & Priority */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Expected Delivery Date</label>
+                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Advance Deposit Received (₹)</label>
                   <input
-                    type="date"
-                    value={formExpectedDate}
-                    onChange={(e) => setFormExpectedDate(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 transition-colors"
+                    type="number"
+                    value={formAdvanceDeposit}
+                    onChange={(e) => setFormAdvanceDeposit(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono transition-colors"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Priority Level</label>
-                  <select
-                    value={formPriority}
-                    onChange={(e) => setFormPriority(e.target.value as any)}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 transition-colors"
-                  >
-                    <option value="STANDARD">Standard (15-20 Days)</option>
-                    <option value="HIGH_PRIORITY_BRIDAL">High Priority Bridal</option>
-                    <option value="RUSH">Express Rush (&lt; 7 Days)</option>
-                  </select>
+                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Estimated Total Order Value (₹)</label>
+                  <input
+                    type="number"
+                    value={formEstimatedTotal}
+                    onChange={(e) => setFormEstimatedTotal(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono transition-colors"
+                  />
                 </div>
+              </div>
+
+              {/* Dynamic Financial Calculation Summary */}
+              <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-md p-3 text-xs space-y-1">
+                <div className="flex justify-between text-neutral-500">
+                  <span>Estimated Metal Cost ({targetWeightNum}g × ₹{lockedRateNum}):</span>
+                  <span className="font-mono text-neutral-700">₹ {estimatedMetalCost.toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex justify-between text-neutral-500">
+                  <span>Advance Received:</span>
+                  <span className="font-mono text-emerald-700">₹ {advanceDepositNum.toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex justify-between font-medium text-neutral-800 pt-1 border-t border-[#e2e8f0]">
+                  <span>Balance Due on Delivery:</span>
+                  <span className="font-mono text-amber-700">₹ {balanceRemaining.toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+
+              {/* Priority Level */}
+              <div>
+                <label className="text-xs font-medium text-neutral-700 mb-1 block">Priority Level</label>
+                <select
+                  value={formPriority}
+                  onChange={(e) => setFormPriority(e.target.value as any)}
+                  className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 transition-colors"
+                >
+                  <option value="STANDARD">Standard (15-20 Days)</option>
+                  <option value="HIGH_PRIORITY_BRIDAL">High Priority Bridal</option>
+                  <option value="RUSH">Express Rush (&lt; 7 Days)</option>
+                </select>
               </div>
 
               {/* CAD 3D File Attachment Dropzone */}
               <div>
                 <label className="text-xs font-medium text-neutral-700 mb-1 block">CAD 3D Model Attachment</label>
-                <div className="border border-dashed border-[#cbd5e1] hover:border-emerald-500 bg-[#f8fafc] rounded-md p-4 text-center cursor-pointer transition-colors">
-                  <UploadCloud className="w-6 h-6 text-neutral-400 mx-auto mb-1.5" />
+                <div className="border border-dashed border-[#cbd5e1] hover:border-emerald-500 bg-[#f8fafc] rounded-md p-3 text-center cursor-pointer transition-colors">
+                  <UploadCloud className="w-5 h-5 text-neutral-400 mx-auto mb-1" />
                   <span className="text-xs font-medium text-neutral-700 block">
                     Upload .STEP, .STL, .3DM, or .OBJ file
                   </span>
                   <span className="text-[10px] text-neutral-400 block mt-0.5">
-                    Attached file: <span className="font-mono text-emerald-600">{cadAttachedFileName}</span>
+                    Attached: <span className="font-mono text-emerald-600">{cadAttachedFileName}</span>
                   </span>
                 </div>
               </div>
@@ -1086,6 +1450,7 @@ export function OrdersCustomOrdersView() {
                   rows={2}
                   value={formNotes}
                   onChange={(e) => setFormNotes(e.target.value)}
+                  placeholder="Engravings, hallmarking instructions, fitting specifications..."
                   className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 transition-colors"
                 />
               </div>
@@ -1103,9 +1468,14 @@ export function OrdersCustomOrdersView() {
               <button
                 type="submit"
                 form="new-bespoke-form"
+                disabled={saving}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-2xs cursor-pointer"
               >
-                <Check className="w-3.5 h-3.5" />
+                {saving ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
                 <span>Save Bespoke Order</span>
               </button>
             </div>

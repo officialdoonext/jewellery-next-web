@@ -1,8 +1,19 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
+import { FinanceNavigationHeader } from './FinanceNavigationHeader';
+import { db } from '@/lib/firebase';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  serverTimestamp,
+} from 'firebase/firestore';
 import {
   Users,
   Clock,
@@ -14,94 +25,95 @@ import {
   Check,
   X,
   Plus,
-  BadgeAlert,
   ArrowDownLeft,
   Calendar,
-  MessageSquare,
-  Sparkles,
   CreditCard,
+  Loader2,
+  Trash2,
+  AlertCircle,
+  ShieldCheck,
 } from 'lucide-react';
 
-interface ReceivableRecord {
+export interface ReceivableRecord {
   id: string;
   entity_name: string;
   invoice_no: string;
   invoice_date: string;
   amount_due: number;
+  amount_paid?: number;
+  balance_due?: number;
   due_date: string;
   aging_bucket: 'CURRENT' | '30_DAYS' | '60_DAYS' | '90_DAYS_OVERDUE';
   contact_phone: string;
+  customer_type?: 'Retail Client' | 'Corporate' | 'Wholesale Broker';
+  status?: 'PENDING' | 'PARTIALLY_PAID' | 'CLEARED';
+  created_at?: any;
 }
 
-const INITIAL_RECEIVABLES: ReceivableRecord[] = [
-  {
-    id: '11223344-c3d4-e5f6-a1b2-445566778899',
-    entity_name: 'GMR Corporate Gifting Services',
-    invoice_no: 'INV-26-0710',
-    invoice_date: '2026-10-20',
-    amount_due: 380000.0,
-    due_date: '2026-11-10',
-    aging_bucket: 'CURRENT',
-    contact_phone: '+91 98490 12345',
-  },
-  {
-    id: '11223344-c3d4-e5f6-a1b2-445566778900',
-    entity_name: 'Dr. Radhika Rao (Bridal Polki Suite Credit)',
-    invoice_no: 'INV-26-0685',
-    invoice_date: '2026-10-15',
-    amount_due: 840000.0,
-    due_date: '2026-11-05',
-    aging_bucket: 'CURRENT',
-    contact_phone: '+91 97011 23456',
-  },
-  {
-    id: '11223344-c3d4-e5f6-a1b2-445566778901',
-    entity_name: 'Apollo Hospital Doctors Guild Welfare',
-    invoice_no: 'INV-26-0590',
-    invoice_date: '2026-09-18',
-    amount_due: 410000.0,
-    due_date: '2026-10-18',
-    aging_bucket: '30_DAYS',
-    contact_phone: '+91 98480 34567',
-  },
-  {
-    id: '11223344-c3d4-e5f6-a1b2-445566778902',
-    entity_name: 'KIMS Medical Directors Memento Order',
-    invoice_no: 'INV-26-0480',
-    invoice_date: '2026-08-22',
-    amount_due: 150000.0,
-    due_date: '2026-09-22',
-    aging_bucket: '60_DAYS',
-    contact_phone: '+91 99890 45678',
-  },
-  {
-    id: '11223344-c3d4-e5f6-a1b2-445566778903',
-    entity_name: 'Vikramaditya Infrastructure Corp',
-    invoice_no: 'INV-26-0310',
-    invoice_date: '2026-06-15',
-    amount_due: 62000.0,
-    due_date: '2026-07-15',
-    aging_bucket: '90_DAYS_OVERDUE',
-    contact_phone: '+91 91210 56789',
-  },
-];
-
 export function FinanceReceivablesView() {
-  const [receivables, setReceivables] = useState<ReceivableRecord[]>(INITIAL_RECEIVABLES);
-  const [activeTab, setActiveTab] = useState<'data' | 'definition'>('data');
+  const [receivables, setReceivables] = useState<ReceivableRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedAgingFilter, setSelectedAgingFilter] = useState<string>('ALL');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Modals & drawers
+  const [isNewInvoiceOpen, setIsNewInvoiceOpen] = useState(false);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
-  const [selectedReceivable, setSelectedReceivable] = useState<ReceivableRecord | null>(null);
-  const [receiptAmount, setReceiptAmount] = useState<number>(0);
-  const [receiptBank, setReceiptBank] = useState('HDFC Jewellery Current - 9021');
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [activeReceivable, setActiveReceivable] = useState<ReceivableRecord | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<ReceivableRecord | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
+  // New Receivable Form State
+  const [entityName, setEntityName] = useState('');
+  const [invoiceNo, setInvoiceNo] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().substring(0, 10));
+  const [amountDue, setAmountDue] = useState<number>(0);
+  const [dueDate, setDueDate] = useState(new Date().toISOString().substring(0, 10));
+  const [contactPhone, setContactPhone] = useState('+91 98490 12345');
+  const [custType, setCustType] = useState<ReceivableRecord['customer_type']>('Retail Client');
+  const [agingBucket, setAgingBucket] = useState<ReceivableRecord['aging_bucket']>('CURRENT');
+
+  // Record Inward Payment Form State
+  const [receiptPaymentVal, setReceiptPaymentVal] = useState<number>(0);
+  const [receiptBank, setReceiptBank] = useState('HDFC Jewellery Current - 9021');
+
+  const showToast = (type: 'success' | 'error', text: string) => {
+    setToastMessage({ type, text });
     setTimeout(() => setToastMessage(null), 3500);
   };
+
+  const fetchReceivables = async () => {
+    try {
+      setLoading(true);
+      const snapshot = await getDocs(collection(db, 'finance_receivables'));
+      const list: ReceivableRecord[] = [];
+      snapshot.forEach((d) => {
+        const data = d.data();
+        const tot = Number(data.amount_due) || 0;
+        const paid = Number(data.amount_paid) || 0;
+        const bal = typeof data.balance_due === 'number' ? data.balance_due : Math.max(0, tot - paid);
+        list.push({
+          id: d.id,
+          ...(data as Omit<ReceivableRecord, 'id'>),
+          amount_paid: paid,
+          balance_due: bal,
+        });
+      });
+      list.sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''));
+      setReceivables(list);
+    } catch (err: any) {
+      console.error('Error fetching receivables:', err);
+      showToast('error', err.message || 'Failed to fetch customer receivables');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchReceivables();
+  }, []);
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -109,300 +121,372 @@ export function FinanceReceivablesView() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleSendWhatsApp = (entity: string, phone: string, amount: number) => {
-    showToast(`WhatsApp payment reminder & UPI link sent to ${entity} (${phone})`);
-  };
-
-  const openRecordReceipt = (item: ReceivableRecord) => {
-    setSelectedReceivable(item);
-    setReceiptAmount(item.amount_due);
+  // Open Receipt Modal
+  const handleOpenReceiptModal = (rec: ReceivableRecord) => {
+    setActiveReceivable(rec);
+    setReceiptPaymentVal(rec.balance_due ?? rec.amount_due);
     setIsReceiptModalOpen(true);
   };
 
-  const handleConfirmReceipt = (e: React.FormEvent) => {
+  // Record Inward Payment Receipt
+  const handleSavePaymentReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedReceivable || receiptAmount <= 0) return;
+    if (!activeReceivable || receiptPaymentVal <= 0) {
+      showToast('error', 'Please enter a valid receipt payment amount');
+      return;
+    }
 
-    if (receiptAmount >= selectedReceivable.amount_due) {
-      setReceivables((prev) => prev.filter((r) => r.id !== selectedReceivable.id));
-      showToast(`Settled full receivable of ₹ ${receiptAmount.toLocaleString('en-IN')} for ${selectedReceivable.entity_name}`);
-    } else {
+    const currentPaid = Number(activeReceivable.amount_paid) || 0;
+    const newPaid = currentPaid + Number(receiptPaymentVal);
+    const newBal = Math.max(0, Number(activeReceivable.amount_due) - newPaid);
+    const newStatus: ReceivableRecord['status'] = newBal === 0 ? 'CLEARED' : 'PARTIALLY_PAID';
+
+    try {
+      setSaving(true);
+      await updateDoc(doc(db, 'finance_receivables', activeReceivable.id), {
+        amount_paid: newPaid,
+        balance_due: newBal,
+        status: newStatus,
+      });
+
       setReceivables((prev) =>
         prev.map((r) =>
-          r.id === selectedReceivable.id
-            ? { ...r, amount_due: r.amount_due - Number(receiptAmount) }
+          r.id === activeReceivable.id
+            ? { ...r, amount_paid: newPaid, balance_due: newBal, status: newStatus }
             : r
         )
       );
-      showToast(`Recorded partial receipt of ₹ ${receiptAmount.toLocaleString('en-IN')}`);
+      setIsReceiptModalOpen(false);
+      showToast(
+        'success',
+        `Recorded inward payment of ₹ ${receiptPaymentVal.toLocaleString('en-IN')} for ${activeReceivable.entity_name}`
+      );
+    } catch (err: any) {
+      console.error('Error recording payment:', err);
+      showToast('error', err.message || 'Failed to update receivable');
+    } finally {
+      setSaving(false);
     }
-    setIsReceiptModalOpen(false);
   };
+
+  // Create Receivable
+  const handleCreateReceivable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (amountDue <= 0 || !entityName.trim()) {
+      showToast('error', 'Please enter client name and amount due');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const invNo = invoiceNo.trim() || `INV-${new Date().getFullYear().toString().slice(-2)}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const payload: Omit<ReceivableRecord, 'id'> = {
+        entity_name: entityName.trim(),
+        invoice_no: invNo,
+        invoice_date: invoiceDate,
+        amount_due: Number(amountDue),
+        amount_paid: 0,
+        balance_due: Number(amountDue),
+        due_date: dueDate,
+        aging_bucket: agingBucket,
+        contact_phone: contactPhone.trim(),
+        customer_type: custType,
+        status: 'PENDING',
+        created_at: serverTimestamp(),
+      };
+
+      const docRef = await addDoc(collection(db, 'finance_receivables'), payload);
+      setReceivables((prev) => [{ id: docRef.id, ...payload }, ...prev]);
+      setIsNewInvoiceOpen(false);
+      setEntityName('');
+      setAmountDue(0);
+      setInvoiceNo('');
+      showToast('success', `Created customer receivable #${invNo}`);
+    } catch (err: any) {
+      console.error('Error creating receivable:', err);
+      showToast('error', err.message || 'Failed to save receivable');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Delete Receivable
+  const handleDeleteReceivable = async () => {
+    if (!itemToDelete) return;
+    try {
+      setSaving(true);
+      await deleteDoc(doc(db, 'finance_receivables', itemToDelete.id));
+      setReceivables((prev) => prev.filter((r) => r.id !== itemToDelete.id));
+      showToast('success', `Deleted receivable invoice #${itemToDelete.invoice_no}`);
+      setItemToDelete(null);
+    } catch (err: any) {
+      console.error('Error deleting receivable:', err);
+      showToast('error', err.message || 'Failed to delete receivable');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // KPI Calculations
+  const totalOutstanding = receivables
+    .filter((r) => r.status !== 'CLEARED')
+    .reduce((acc, curr) => acc + (Number(curr.balance_due ?? curr.amount_due) || 0), 0);
+  const currentBucketTotal = receivables
+    .filter((r) => r.aging_bucket === 'CURRENT' && r.status !== 'CLEARED')
+    .reduce((acc, curr) => acc + (Number(curr.balance_due ?? curr.amount_due) || 0), 0);
+  const overdueBucketTotal = receivables
+    .filter((r) => (r.aging_bucket === '60_DAYS' || r.aging_bucket === '90_DAYS_OVERDUE') && r.status !== 'CLEARED')
+    .reduce((acc, curr) => acc + (Number(curr.balance_due ?? curr.amount_due) || 0), 0);
+  const clearedCount = receivables.filter((r) => r.status === 'CLEARED').length;
+
+  const filteredReceivables = receivables.filter((item) => {
+    if (selectedAgingFilter !== 'ALL' && item.aging_bucket !== selectedAgingFilter) return false;
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      (item.entity_name || '').toLowerCase().includes(q) ||
+      (item.invoice_no || '').toLowerCase().includes(q) ||
+      (item.contact_phone || '').toLowerCase().includes(q) ||
+      (item.aging_bucket || '').toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0">
-      <TabBar title="accounts_receivable" />
+      <TabBar title="accounts_receivable_aging" />
       <ActionToolbar
-        filterPlaceholder="Filter receivables by customer, corporate client, invoice #, phone..."
-        insertLabel="Record Receipt"
-        onInsertClick={() => {
-          if (receivables.length > 0) openRecordReceipt(receivables[0]);
-        }}
+        filterPlaceholder="Filter by customer, invoice #, phone, aging..."
+        insertLabel="New Receivable"
+        onInsertClick={() => setIsNewInvoiceOpen(true)}
+        onRefresh={fetchReceivables}
       />
 
+      <FinanceNavigationHeader activePage="receivables" />
+
+      {/* Real-time Toast Banner */}
       {toastMessage && (
-        <div className="fixed top-12 right-6 z-50 bg-neutral-900 text-white text-xs px-4 py-2.5 rounded-lg shadow-lg flex items-center gap-2 border border-neutral-700 animate-in fade-in slide-in-from-top-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          <span>{toastMessage}</span>
+        <div
+          className={`px-4 py-2 text-xs flex items-center justify-between transition-all shrink-0 ${
+            toastMessage.type === 'success'
+              ? 'bg-emerald-50 text-emerald-800 border-b border-emerald-200'
+              : 'bg-red-50 text-red-800 border-b border-red-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {toastMessage.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+            )}
+            <span className="font-medium">{toastMessage.text}</span>
+          </div>
+          <button
+            onClick={() => setToastMessage(null)}
+            className="text-neutral-400 hover:text-neutral-700 p-0.5"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
       <div className="flex-1 overflow-y-auto bg-[#fafafa] flex flex-col custom-scrollbar w-full">
-        {/* KPI Metrics */}
-        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white">
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        {/* KPI Metrics Cards */}
+        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white shrink-0">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
               <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Total Receivables</span>
+                <span className="text-[11px] font-medium uppercase tracking-wider">Total Outstanding</span>
                 <Users className="w-3.5 h-3.5 text-blue-600" />
               </div>
-              <div className="text-xl font-medium text-neutral-900 font-mono">₹ 18,42,000</div>
-              <div className="text-[11px] text-neutral-500 mt-1">5 Client accounts</div>
+              <div className="text-xl font-medium text-neutral-900 font-mono">
+                ₹ {totalOutstanding.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+              <div className="text-[11px] text-neutral-500 mt-1">Pending client balances</div>
+            </div>
+
+            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Current (0-30 Days)</span>
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              </div>
+              <div className="text-xl font-medium text-emerald-700 font-mono">
+                ₹ {currentBucketTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+              <div className="text-[11px] text-emerald-600 mt-1">Normal billing credit cycle</div>
+            </div>
+
+            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Overdue (&gt;60 Days)</span>
+                <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+              </div>
+              <div className="text-xl font-medium text-red-600 font-mono">
+                ₹ {overdueBucketTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+              <div className="text-[11px] text-red-500 mt-1">Requires follow-up calls</div>
             </div>
 
             <div className="p-3.5 rounded-lg bg-emerald-50/50 border border-emerald-200 hover:border-emerald-300 transition-colors shadow-2xs">
               <div className="flex items-center justify-between text-emerald-800 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Current 0-30 Days</span>
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="text-[11px] font-medium uppercase tracking-wider">Settled Invoices</span>
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
               </div>
-              <div className="text-xl font-medium text-emerald-900 font-mono">₹ 12,20,000</div>
-              <div className="text-[11px] text-emerald-700 mt-1">Healthy regular terms</div>
-            </div>
-
-            <div className="p-3.5 rounded-lg bg-blue-50/50 border border-blue-200 hover:border-blue-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-blue-800 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">31-60 Days</span>
-                <Clock className="w-3.5 h-3.5 text-blue-600" />
+              <div className="text-xl font-medium text-emerald-900 font-mono">
+                {clearedCount} / {receivables.length}{' '}
+                <span className="text-xs text-emerald-700 font-sans font-medium">Cleared</span>
               </div>
-              <div className="text-xl font-medium text-blue-900 font-mono">₹ 4,10,000</div>
-              <div className="text-[11px] text-blue-700 mt-1">Payment reminder sent</div>
-            </div>
-
-            <div className="p-3.5 rounded-lg bg-amber-50/50 border border-amber-200 hover:border-amber-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-amber-800 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">61-90 Days</span>
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-              </div>
-              <div className="text-xl font-medium text-amber-900 font-mono">₹ 1,50,000</div>
-              <div className="text-[11px] text-amber-700 mt-1">Senior manager call</div>
-            </div>
-
-            <div className="p-3.5 rounded-lg bg-red-50/50 border border-red-200 hover:border-red-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-red-800 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">90+ Days Overdue</span>
-                <BadgeAlert className="w-3.5 h-3.5 text-red-600" />
-              </div>
-              <div className="text-xl font-medium text-red-900 font-mono">₹ 62,000</div>
-              <div className="text-[11px] text-red-700 mt-1">Credit hold applied</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Aging Portfolio Visual Progress Bar */}
-        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white">
-          <div className="p-4 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-neutral-800 uppercase tracking-wider">
-                Aging Portfolio Distribution & Recovery Risk
-              </span>
-              <span className="text-xs text-neutral-500 font-mono">
-                Total ₹ 18.42 Lakhs • 66.2% Current
-              </span>
-            </div>
-
-            <div className="h-3 w-full bg-neutral-200 rounded-full overflow-hidden flex">
-              <div style={{ width: '66.2%' }} className="bg-emerald-500 h-full" title="Current 0-30 Days: 66.2%" />
-              <div style={{ width: '22.3%' }} className="bg-blue-500 h-full" title="31-60 Days: 22.3%" />
-              <div style={{ width: '8.1%' }} className="bg-amber-500 h-full" title="61-90 Days: 8.1%" />
-              <div style={{ width: '3.4%' }} className="bg-red-500 h-full" title="90+ Days Overdue: 3.4%" />
-            </div>
-
-            <div className="flex flex-wrap items-center gap-4 text-xs mt-3 font-mono">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                <span className="text-neutral-600">Current (66.2%)</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                <span className="text-neutral-600">31-60 Days (22.3%)</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                <span className="text-neutral-600">61-90 Days (8.1%)</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                <span className="text-neutral-600">90+ Days (3.4%)</span>
+              <div className="text-[11px] text-emerald-700 mt-1 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Inward collections complete
               </div>
             </div>
           </div>
         </div>
 
-        {/* Supabase-style Table */}
+        {/* Filter Bar */}
+        <div className="px-4 py-2 bg-white border-b border-[#e5e7eb] flex items-center gap-2 text-xs shrink-0 overflow-x-auto no-scrollbar">
+          <span className="text-[11px] text-neutral-400 uppercase font-medium shrink-0">Aging Bucket:</span>
+          {[
+            { id: 'ALL', label: 'All Receivables' },
+            { id: 'CURRENT', label: 'Current (<30d)' },
+            { id: '30_DAYS', label: '30-60 Days' },
+            { id: '60_DAYS', label: '60-90 Days' },
+            { id: '90_DAYS_OVERDUE', label: '90+ Days Overdue' },
+          ].map((bucket) => (
+            <button
+              key={bucket.id}
+              onClick={() => setSelectedAgingFilter(bucket.id)}
+              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer shrink-0 ${
+                selectedAgingFilter === bucket.id
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : 'text-neutral-600 hover:bg-neutral-100'
+              }`}
+            >
+              {bucket.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Receivables Table or Empty State */}
         <div className="p-4 sm:p-5 flex-1 flex flex-col">
-          <div className="bg-white border border-[#e5e7eb] rounded-lg shadow-2xs overflow-hidden flex flex-col flex-1">
-            <div className="px-4 py-2.5 border-b border-[#e5e7eb] bg-[#f8fafc] flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-emerald-600" />
-                <span className="font-mono font-medium text-neutral-800">
-                  public.accounts_receivable
-                </span>
-                <span className="text-neutral-400">•</span>
-                <span className="text-neutral-500">
-                  Showing {receivables.length} accounts receivable records
-                </span>
-              </div>
-
-              <div className="flex items-center bg-neutral-200/60 p-0.5 rounded border border-neutral-300/60 text-[13px]">
-                <button
-                  onClick={() => setActiveTab('data')}
-                  className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
-                    activeTab === 'data'
-                      ? 'bg-white text-neutral-900 shadow-2xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  Data
-                </button>
-                <button
-                  onClick={() => setActiveTab('definition')}
-                  className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
-                    activeTab === 'definition'
-                      ? 'bg-white text-neutral-900 shadow-2xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  Definition
-                </button>
-              </div>
+          {loading ? (
+            <div className="py-20 flex flex-col items-center justify-center text-neutral-500">
+              <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mb-3" />
+              <p className="text-xs font-medium">Loading live customer receivables...</p>
             </div>
-
-            {activeTab === 'data' && (
-              <div className="flex-1 overflow-x-auto custom-scrollbar w-full">
+          ) : filteredReceivables.length === 0 ? (
+            <div className="py-16 flex flex-col items-center justify-center text-center p-8 bg-white rounded-lg border border-[#e5e7eb] shadow-2xs">
+              <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 mb-3">
+                <Users className="w-6 h-6" />
+              </div>
+              <h3 className="text-sm font-medium text-neutral-900 mb-1">No Receivables Found</h3>
+              <p className="text-xs text-neutral-500 max-w-sm mb-4">
+                {searchQuery || selectedAgingFilter !== 'ALL'
+                  ? 'No customer receivables match the criteria. Try clearing the filter.'
+                  : 'Record customer bridal suite credit bills, corporate gifting invoices, and inward payment receipts.'}
+              </p>
+              <button
+                onClick={() => setIsNewInvoiceOpen(true)}
+                className="px-3.5 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Customer Receivable</span>
+              </button>
+            </div>
+          ) : (
+            <div className="border border-[#e5e7eb] rounded-lg bg-white overflow-hidden shadow-2xs">
+              <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="bg-[#fcfcfc] border-b border-[#e5e7eb] text-neutral-600 font-mono text-[11px]">
-                      <th className="w-10 px-3 py-2 border-r border-[#e5e7eb] text-center">
-                        <input
-                          type="checkbox"
-                          className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                        />
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">entity_name</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">invoice_no</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">invoice_date</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <span className="text-neutral-800">amount_due (₹)</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">due_date</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-center">
-                        <span className="text-neutral-800">aging_bucket</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">contact_phone</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-center">
-                        <span className="text-neutral-800">actions</span>
-                      </th>
-                      <th className="w-16 px-3 py-2 text-center font-medium">uuid</th>
+                    <tr className="bg-[#f8fafc] border-b border-[#e2e8f0] text-neutral-500 uppercase tracking-wider text-[11px]">
+                      <th className="py-2.5 px-3 font-medium">Client / Corporate Entity</th>
+                      <th className="py-2.5 px-3 font-medium">Invoice #</th>
+                      <th className="py-2.5 px-3 font-medium">Date</th>
+                      <th className="py-2.5 px-3 font-medium text-right">Invoice Val (₹)</th>
+                      <th className="py-2.5 px-3 font-medium text-right">Balance Due (₹)</th>
+                      <th className="py-2.5 px-3 font-medium">Due Date</th>
+                      <th className="py-2.5 px-3 font-medium text-center">Aging</th>
+                      <th className="py-2.5 px-3 font-medium">Contact Phone</th>
+                      <th className="py-2.5 px-3 font-medium text-center">Receipt</th>
+                      <th className="py-2.5 px-3 font-medium text-center">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#e5e7eb] text-neutral-800 font-mono">
-                    {receivables.map((row) => (
-                      <tr key={row.id} className="hover:bg-neutral-50/80 transition-colors">
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] text-center">
-                          <input
-                            type="checkbox"
-                            className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                          />
-                        </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap font-sans text-neutral-900 font-medium">
+                  <tbody className="divide-y divide-[#e2e8f0] text-neutral-700">
+                    {filteredReceivables.map((row) => (
+                      <tr key={row.id} className="hover:bg-neutral-50/70 transition-colors">
+                        <td className="py-2 px-3 font-medium text-neutral-900 max-w-xs truncate" title={row.entity_name}>
                           {row.entity_name}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-700">
-                          {row.invoice_no}
+                        <td className="py-2 px-3 font-mono text-[11px] text-neutral-600 whitespace-nowrap">
+                          <button
+                            onClick={() => copyToClipboard(row.invoice_no, row.id)}
+                            className="inline-flex items-center gap-1 hover:text-emerald-700 cursor-pointer"
+                            title="Copy Invoice #"
+                          >
+                            <span>{row.invoice_no}</span>
+                            {copiedId === row.id ? (
+                              <Check className="w-3 h-3 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-2.5 h-2.5 text-neutral-400 opacity-60" />
+                            )}
+                          </button>
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-600">
+                        <td className="py-2 px-3 font-mono text-[11px] text-neutral-500 whitespace-nowrap">
                           {row.invoice_date}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-right font-medium text-neutral-900">
+                        <td className="py-2 px-3 font-mono text-neutral-600 text-right whitespace-nowrap">
                           ₹ {row.amount_due.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-600">
+                        <td className="py-2 px-3 font-mono font-medium text-neutral-900 text-right whitespace-nowrap">
+                          ₹ {(row.balance_due ?? row.amount_due).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2 px-3 font-mono text-[11px] text-neutral-600 whitespace-nowrap">
                           {row.due_date}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-center">
-                          {row.aging_bucket === 'CURRENT' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              CURRENT
-                            </span>
-                          )}
-                          {row.aging_bucket === '30_DAYS' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-blue-50 text-blue-700 border border-blue-200">
-                              30 DAYS
-                            </span>
-                          )}
-                          {row.aging_bucket === '60_DAYS' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-amber-50 text-amber-700 border border-amber-200">
-                              60 DAYS
-                            </span>
-                          )}
-                          {row.aging_bucket === '90_DAYS_OVERDUE' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-red-50 text-red-700 border border-red-200">
-                              90+ DAYS OVERDUE
-                            </span>
-                          )}
+                        <td className="py-2 px-3 text-center whitespace-nowrap">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
+                              row.aging_bucket === 'CURRENT'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : row.aging_bucket === '30_DAYS'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : row.aging_bucket === '60_DAYS'
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-red-50 text-red-700 border-red-200'
+                            }`}
+                          >
+                            {row.aging_bucket.replace('_', ' ')}
+                          </span>
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-600">
-                          {row.contact_phone}
-                        </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-center">
-                          <div className="flex items-center justify-center gap-1.5 font-sans">
-                            <button
-                              onClick={() => handleSendWhatsApp(row.entity_name, row.contact_phone, row.amount_due)}
-                              className="px-2 py-1 text-[11px] rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 flex items-center gap-1 cursor-pointer"
-                              title="Send WhatsApp payment link"
-                            >
-                              <MessageSquare className="w-3 h-3 text-emerald-600" />
-                              WhatsApp Link
-                            </button>
-                            <button
-                              onClick={() => openRecordReceipt(row)}
-                              className="px-2 py-1 text-[11px] rounded bg-neutral-900 text-white hover:bg-neutral-800 cursor-pointer"
-                            >
-                              Record Receipt
-                            </button>
+                        <td className="py-2 px-3 font-mono text-[11px] text-neutral-600 whitespace-nowrap">
+                          <div className="flex items-center gap-1">
+                            <Phone className="w-3 h-3 text-neutral-400" />
+                            <span>{row.contact_phone}</span>
                           </div>
                         </td>
-                        <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                        <td className="py-2 px-3 text-center whitespace-nowrap">
+                          {(row.balance_due ?? row.amount_due) > 0 ? (
+                            <button
+                              onClick={() => handleOpenReceiptModal(row)}
+                              className="px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-medium text-[11px] inline-flex items-center gap-1 transition-colors cursor-pointer"
+                            >
+                              <ArrowDownLeft className="w-3 h-3 text-emerald-600" />
+                              <span>Collect Inward</span>
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-medium">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              Cleared
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 px-3 text-center whitespace-nowrap">
                           <button
-                            onClick={() => copyToClipboard(row.id, row.id)}
-                            className="p-1 text-neutral-400 hover:text-neutral-700 transition-colors"
-                            title="Copy UUID"
+                            onClick={() => setItemToDelete(row)}
+                            className="p-1 rounded text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                            title="Delete receivable"
                           >
-                            {copiedId === row.id ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-600" />
-                            ) : (
-                              <Copy className="w-3.5 h-3.5" />
-                            )}
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </td>
                       </tr>
@@ -410,126 +494,289 @@ export function FinanceReceivablesView() {
                   </tbody>
                 </table>
               </div>
-            )}
-
-            {activeTab === 'definition' && (
-              <div className="p-4 bg-[#0a0a0a] text-neutral-200 font-mono text-xs overflow-x-auto">
-                <div className="leading-relaxed">
-                  <span className="text-emerald-400">CREATE TABLE</span> public.accounts_receivable (
-                  <br />
-                  &nbsp;&nbsp;id <span className="text-purple-400">UUID</span>{' '}
-                  <span className="text-neutral-400">PRIMARY KEY DEFAULT gen_random_uuid()</span>,
-                  <br />
-                  &nbsp;&nbsp;entity_name <span className="text-purple-400">VARCHAR(150)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL</span>,
-                  <br />
-                  &nbsp;&nbsp;invoice_no <span className="text-purple-400">VARCHAR(50)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL</span>,
-                  <br />
-                  &nbsp;&nbsp;invoice_date <span className="text-purple-400">DATE</span>{' '}
-                  <span className="text-neutral-400">NOT NULL</span>,
-                  <br />
-                  &nbsp;&nbsp;amount_due <span className="text-purple-400">NUMERIC(10,2)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL</span>,
-                  <br />
-                  &nbsp;&nbsp;due_date <span className="text-purple-400">DATE</span>{' '}
-                  <span className="text-neutral-400">NOT NULL</span>,
-                  <br />
-                  &nbsp;&nbsp;aging_bucket <span className="text-purple-400">VARCHAR(20)</span>{' '}
-                  <span className="text-neutral-400">CHECK (aging_bucket IN (&apos;CURRENT&apos;, &apos;30_DAYS&apos;, &apos;60_DAYS&apos;, &apos;90_DAYS_OVERDUE&apos;))</span>,
-                  <br />
-                  &nbsp;&nbsp;contact_phone <span className="text-purple-400">VARCHAR(25)</span>
-                  <br />
-                  );
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Modal: Record Customer Receipt */}
-      {isReceiptModalOpen && selectedReceivable && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-2xs p-4">
-          <div className="w-full max-w-md bg-white rounded-lg shadow-2xl border border-[#e5e7eb] overflow-hidden">
-            <div className="px-5 py-4 border-b border-[#e5e7eb] flex items-center justify-between bg-[#f8fafc]">
+      {/* MODAL: Record Inward Payment */}
+      {isReceiptModalOpen && activeReceivable && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="p-4 bg-[#f8fafc] border-b border-[#e2e8f0] flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <CreditCard className="w-4 h-4 text-emerald-600" />
-                <h3 className="text-sm font-medium text-neutral-900">
-                  Record Receivable Payment Receipt
+                <ArrowDownLeft className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-xs font-medium text-neutral-900 uppercase tracking-wider">
+                  Record Inward Payment Receipt
                 </h3>
               </div>
               <button
                 onClick={() => setIsReceiptModalOpen(false)}
-                className="p-1 hover:bg-neutral-200/60 rounded text-neutral-400 hover:text-neutral-700"
+                className="text-neutral-400 hover:text-neutral-700 p-1 rounded"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleConfirmReceipt} className="p-5 space-y-4">
-              <div className="p-3 bg-neutral-50 rounded border border-neutral-200 text-xs space-y-1 font-mono">
-                <div className="flex justify-between text-neutral-600">
-                  <span>Customer / Client:</span>
-                  <span className="font-sans font-medium text-neutral-900">{selectedReceivable.entity_name}</span>
-                </div>
-                <div className="flex justify-between text-neutral-600">
-                  <span>Invoice Reference:</span>
-                  <span>{selectedReceivable.invoice_no}</span>
-                </div>
-                <div className="flex justify-between text-neutral-900 font-medium">
-                  <span>Outstanding Dues:</span>
-                  <span className="text-amber-700">₹ {selectedReceivable.amount_due.toLocaleString('en-IN')}</span>
+            <form onSubmit={handleSavePaymentReceipt} className="p-5 space-y-4 text-xs">
+              <div className="p-3 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
+                <div className="font-medium text-neutral-900 text-xs">{activeReceivable.entity_name}</div>
+                <div className="text-[11px] text-neutral-500 font-mono mt-0.5">
+                  Invoice #{activeReceivable.invoice_no} • Outstanding: ₹ {(activeReceivable.balance_due ?? activeReceivable.amount_due).toLocaleString('en-IN')}
                 </div>
               </div>
 
               <div>
-                <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                  Receipt Amount (₹)
+                <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                  Payment Inward Amount (₹) *
                 </label>
                 <input
                   type="number"
-                  min={1}
-                  max={selectedReceivable.amount_due}
-                  value={receiptAmount}
-                  onChange={(e) => setReceiptAmount(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
+                  min="1"
+                  max={activeReceivable.balance_due ?? activeReceivable.amount_due}
+                  step="0.01"
                   required
+                  value={receiptPaymentVal || ''}
+                  onChange={(e) => setReceiptPaymentVal(parseFloat(e.target.value) || 0)}
+                  className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded font-mono font-medium focus:border-emerald-500 focus:bg-white focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                  Deposit Into Bank Account
+                <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                  Received Into Account
                 </label>
                 <select
                   value={receiptBank}
                   onChange={(e) => setReceiptBank(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
+                  className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
                 >
                   <option value="HDFC Jewellery Current - 9021">HDFC Jewellery Current - 9021</option>
+                  <option value="ICICI Bullion Overdraft - 4410">ICICI Bullion Overdraft - 4410</option>
                   <option value="SBI Current Account - 1102">SBI Current Account - 1102</option>
-                  <option value="Showroom Counter Cash Drawer">Showroom Counter Cash Drawer</option>
+                  <option value="Counter Cash Drawer #01">Counter Cash Drawer #01</option>
                 </select>
               </div>
 
-              <div className="pt-2 flex items-center justify-end gap-2">
+              {/* Dynamic Balance Preview */}
+              <div className="p-2.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] flex justify-between">
+                <span>Remaining Customer Balance:</span>
+                <span className="font-mono font-medium">
+                  ₹ {Math.max(0, (activeReceivable.balance_due ?? activeReceivable.amount_due) - Number(receiptPaymentVal)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#e2e8f0]">
                 <button
                   type="button"
                   onClick={() => setIsReceiptModalOpen(false)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 transition-colors cursor-pointer"
+                  className="px-3 py-1.5 rounded border border-[#e2e8f0] text-neutral-600 hover:bg-neutral-50 font-medium"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-2xs cursor-pointer"
+                  disabled={saving}
+                  className="px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                 >
-                  <Check className="w-3.5 h-3.5" />
-                  Confirm Receipt
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>Record Inward Collection</span>
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: New Receivable / Invoice */}
+      {isNewInvoiceOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="p-4 bg-[#f8fafc] border-b border-[#e2e8f0] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-xs font-medium text-neutral-900 uppercase tracking-wider">
+                  Create Customer Receivable / Credit Invoice
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsNewInvoiceOpen(false)}
+                className="text-neutral-400 hover:text-neutral-700 p-1 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateReceivable} className="p-5 space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Customer Type
+                  </label>
+                  <select
+                    value={custType}
+                    onChange={(e) => setCustType(e.target.value as ReceivableRecord['customer_type'])}
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
+                  >
+                    <option value="Retail Client">Retail Bridal Client</option>
+                    <option value="Corporate">Corporate Gifting Client</option>
+                    <option value="Wholesale Broker">Wholesale Broker</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Aging Bracket
+                  </label>
+                  <select
+                    value={agingBucket}
+                    onChange={(e) => setAgingBucket(e.target.value as ReceivableRecord['aging_bucket'])}
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
+                  >
+                    <option value="CURRENT">Current (&lt;30 Days)</option>
+                    <option value="30_DAYS">30-60 Days</option>
+                    <option value="60_DAYS">60-90 Days</option>
+                    <option value="90_DAYS_OVERDUE">90+ Days Overdue</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                  Customer / Corporate Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Dr. Radhika Rao / Apollo Hospital Doctors Guild"
+                  value={entityName}
+                  onChange={(e) => setEntityName(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Total Invoice Amount (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.01"
+                    required
+                    value={amountDue || ''}
+                    onChange={(e) => setAmountDue(parseFloat(e.target.value) || 0)}
+                    placeholder="0.00"
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded font-mono font-medium focus:border-emerald-500 focus:bg-white focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Invoice #
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="INV-26-XXXX"
+                    value={invoiceNo}
+                    onChange={(e) => setInvoiceNo(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded font-mono focus:border-emerald-500 focus:bg-white focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Invoice Date
+                  </label>
+                  <input
+                    type="date"
+                    value={invoiceDate}
+                    onChange={(e) => setInvoiceDate(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Settlement Due Date *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                  Contact Phone Number *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="+91 98490 12345"
+                  value={contactPhone}
+                  onChange={(e) => setContactPhone(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded font-mono focus:border-emerald-500 focus:bg-white focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#e2e8f0]">
+                <button
+                  type="button"
+                  onClick={() => setIsNewInvoiceOpen(false)}
+                  className="px-3 py-1.5 rounded border border-[#e2e8f0] text-neutral-600 hover:bg-neutral-50 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>Save Receivable</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Delete Confirmation */}
+      {itemToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-xl w-full max-w-sm p-5 space-y-3 animate-in fade-in zoom-in-95">
+            <div className="w-10 h-10 rounded-full bg-red-50 border border-red-200 flex items-center justify-center text-red-600 mx-auto">
+              <Trash2 className="w-5 h-5" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-sm font-medium text-neutral-900">Delete Receivable Record?</h3>
+              <p className="text-xs text-neutral-500 mt-1">
+                Are you sure you want to delete invoice <span className="font-mono font-medium text-neutral-800">#{itemToDelete.invoice_no}</span> (₹ {itemToDelete.amount_due.toLocaleString('en-IN')}) for {itemToDelete.entity_name}?
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setItemToDelete(null)}
+                className="px-3 py-1.5 rounded border border-[#e2e8f0] text-neutral-600 hover:bg-neutral-50 font-medium text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteReceivable}
+                disabled={saving}
+                className="px-4 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white font-medium text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                <span>Delete Receivable</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

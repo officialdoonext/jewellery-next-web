@@ -1,132 +1,120 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
+import { FinanceNavigationHeader } from './FinanceNavigationHeader';
+import { db } from '@/lib/firebase';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  serverTimestamp,
+} from 'firebase/firestore';
 import {
   Receipt,
   FileCheck,
-  Zap,
   Building,
-  Shield,
-  Percent,
   CheckCircle2,
   Clock,
   Copy,
   Check,
   X,
   Plus,
-  Upload,
   ArrowUpRight,
-  Sparkles,
-  FileText,
-  BadgeAlert,
+  ShieldCheck,
+  AlertCircle,
+  Loader2,
+  Trash2,
+  Zap,
 } from 'lucide-react';
 
-interface ShowroomExpense {
+export interface ShowroomExpense {
   id: string;
   voucher_no: string;
   expense_head: string;
   paid_to: string;
   vendor_gstin: string;
   base_amount: number;
+  gst_rate: number;
   gst_paid: number;
   total_amount: number;
   gst_itc_eligible: boolean;
-  payment_mode: 'Bank Transfer' | 'Petty Cash';
+  payment_mode: 'Bank Transfer' | 'Petty Cash' | 'UPI / Card';
   paid_date: string;
+  approval_status: 'APPROVED' | 'PENDING' | 'REJECTED';
+  created_at?: any;
 }
 
-const INITIAL_EXPENSES: ShowroomExpense[] = [
-  {
-    id: '00112233-b2c3-d4e5-f6a1-334455667788',
-    voucher_no: 'EXP-2026-081',
-    expense_head: 'Showroom Security Agency',
-    paid_to: 'SIS India Armed Security Ltd',
-    vendor_gstin: '36AABCS1429B1Z0',
-    base_amount: 156779.66,
-    gst_paid: 28220.34,
-    total_amount: 185000.0,
-    gst_itc_eligible: true,
-    payment_mode: 'Bank Transfer',
-    paid_date: '2026-10-28',
-  },
-  {
-    id: '00112233-b2c3-d4e5-f6a1-334455667789',
-    voucher_no: 'EXP-2026-082',
-    expense_head: 'Electricity Bill & High-Tension Power',
-    paid_to: 'TSSPDCL Commercial Power Dept',
-    vendor_gstin: '36AAACT0291K1Z2',
-    base_amount: 62450.0,
-    gst_paid: 0.0,
-    total_amount: 62450.0,
-    gst_itc_eligible: false,
-    payment_mode: 'Bank Transfer',
-    paid_date: '2026-10-25',
-  },
-  {
-    id: '00112233-b2c3-d4e5-f6a1-334455667790',
-    voucher_no: 'EXP-2026-083',
-    expense_head: 'Vault Insurance Premium (Jewellers Block Policy)',
-    paid_to: 'New India Assurance Co Ltd',
-    vendor_gstin: '36AAACN0192L1Z9',
-    base_amount: 45000.0,
-    gst_paid: 8100.0,
-    total_amount: 53100.0,
-    gst_itc_eligible: true,
-    payment_mode: 'Bank Transfer',
-    paid_date: '2026-10-20',
-  },
-  {
-    id: '00112233-b2c3-d4e5-f6a1-334455667791',
-    voucher_no: 'EXP-2026-084',
-    expense_head: 'Daikin Central Showroom AC Maintenance AMC',
-    paid_to: 'CoolAir HVAC Engineering',
-    vendor_gstin: '36AALPC4921M1Z5',
-    base_amount: 27957.63,
-    gst_paid: 5032.37,
-    total_amount: 32990.0,
-    gst_itc_eligible: true,
-    payment_mode: 'Bank Transfer',
-    paid_date: '2026-10-18',
-  },
-  {
-    id: '00112233-b2c3-d4e5-f6a1-334455667792',
-    voucher_no: 'EXP-2026-085',
-    expense_head: 'Staff Welfare / Premium Chai & Mineral Water',
-    paid_to: 'Sri Krishna Food Supplies',
-    vendor_gstin: 'Unregistered Local Vendor',
-    base_amount: 8460.0,
-    gst_paid: 0.0,
-    total_amount: 8460.0,
-    gst_itc_eligible: false,
-    payment_mode: 'Petty Cash',
-    paid_date: '2026-10-15',
-  },
+const EXPENSE_HEADS = [
+  'Showroom Security Agency',
+  'Electricity & High-Tension Power',
+  'Vault Insurance Premium (Jewellers Block)',
+  'Central Showroom AC Maintenance AMC',
+  'Staff Salary & Sales Commissions',
+  'BIS Hallmarking & Assay Testing Fees',
+  'Staff Welfare / Tea & Refreshments',
+  'CCTV & Electronic Surveillance AMC',
+  'Marketing, Hoardings & Influencers',
+  'Legal, CA & Internal Audit Fees',
 ];
 
 export function FinanceExpensesView() {
-  const [expenses, setExpenses] = useState<ShowroomExpense[]>(INITIAL_EXPENSES);
-  const [activeTab, setActiveTab] = useState<'data' | 'definition'>('data');
+  const [expenses, setExpenses] = useState<ShowroomExpense[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Modals & drawers
-  const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // Modals & forms
+  const [isNewExpenseOpen, setIsNewExpenseOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<ShowroomExpense | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  // New Expense State
-  const [expenseHead, setExpenseHead] = useState('Showroom Security Agency');
-  const [vendorName, setVendorName] = useState('');
+  // New Expense Form State
+  const [voucherNo, setVoucherNo] = useState('');
+  const [expenseHead, setExpenseHead] = useState(EXPENSE_HEADS[0]);
+  const [paidTo, setPaidTo] = useState('');
   const [vendorGstin, setVendorGstin] = useState('');
   const [baseAmount, setBaseAmount] = useState<number>(0);
   const [gstRate, setGstRate] = useState<number>(18);
-  const [isItcEligible, setIsItcEligible] = useState<boolean>(true);
-  const [paymentMode, setPaymentMode] = useState<'Bank Transfer' | 'Petty Cash'>('Bank Transfer');
+  const [itcEligible, setItcEligible] = useState(true);
+  const [paymentMode, setPaymentMode] = useState<ShowroomExpense['payment_mode']>('Bank Transfer');
+  const [paidDate, setPaidDate] = useState(new Date().toISOString().substring(0, 10));
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
+  // Dynamic calculations in modal
+  const calculatedGstPaid = Number(((baseAmount * gstRate) / 100).toFixed(2));
+  const calculatedTotal = Number((baseAmount + calculatedGstPaid).toFixed(2));
+
+  const showToast = (type: 'success' | 'error', text: string) => {
+    setToastMessage({ type, text });
     setTimeout(() => setToastMessage(null), 3500);
   };
+
+  const fetchExpenses = async () => {
+    try {
+      setLoading(true);
+      const snapshot = await getDocs(collection(db, 'finance_expenses'));
+      const list: ShowroomExpense[] = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, ...(d.data() as Omit<ShowroomExpense, 'id'>) });
+      });
+      list.sort((a, b) => (b.paid_date || '').localeCompare(a.paid_date || ''));
+      setExpenses(list);
+    } catch (err: any) {
+      console.error('Error fetching expenses:', err);
+      showToast('error', err.message || 'Failed to fetch showroom expenses');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchExpenses();
+  }, []);
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -134,236 +122,318 @@ export function FinanceExpensesView() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const calculatedGst = Math.round(((baseAmount * gstRate) / 100) * 100) / 100;
-  const totalCalculated = Math.round((Number(baseAmount) + calculatedGst) * 100) / 100;
-
-  const handleRecordExpense = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (baseAmount <= 0 || !vendorName) return;
-
-    const now = new Date().toISOString().substring(0, 10);
-    const voucherNo = `EXP-2026-${Math.floor(100 + Math.random() * 900)}`;
-
-    const newRecord: ShowroomExpense = {
-      id: crypto.randomUUID(),
-      voucher_no: voucherNo,
-      expense_head: expenseHead,
-      paid_to: vendorName,
-      vendor_gstin: vendorGstin || 'Unregistered',
-      base_amount: Number(baseAmount),
-      gst_paid: calculatedGst,
-      total_amount: totalCalculated,
-      gst_itc_eligible: isItcEligible,
-      payment_mode: paymentMode,
-      paid_date: now,
-    };
-
-    setExpenses([newRecord, ...expenses]);
-    setIsRecordModalOpen(false);
-    setVendorName('');
-    setVendorGstin('');
-    setBaseAmount(0);
-    showToast(`Recorded expense voucher ${voucherNo} of ₹ ${totalCalculated.toLocaleString('en-IN')}`);
+  // Toggle Approval Status
+  const handleToggleApproval = async (id: string, currentStatus: ShowroomExpense['approval_status']) => {
+    const nextStatus = currentStatus === 'APPROVED' ? 'PENDING' : 'APPROVED';
+    try {
+      await updateDoc(doc(db, 'finance_expenses', id), {
+        approval_status: nextStatus,
+      });
+      setExpenses((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, approval_status: nextStatus } : e))
+      );
+      showToast('success', `Expense voucher updated to ${nextStatus}`);
+    } catch (err: any) {
+      console.error('Error toggling expense approval:', err);
+      showToast('error', err.message || 'Failed to update approval status');
+    }
   };
 
-  const totalExpenseSum = expenses.reduce((acc, curr) => acc + curr.total_amount, 0);
-  const totalItcEligible = expenses
+  // Save New Expense
+  const handleCreateExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (baseAmount <= 0 || !paidTo.trim()) {
+      showToast('error', 'Please enter payee name and a valid base amount');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const vNo = voucherNo.trim() || `EXP-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
+      const payload: Omit<ShowroomExpense, 'id'> = {
+        voucher_no: vNo,
+        expense_head: expenseHead,
+        paid_to: paidTo.trim(),
+        vendor_gstin: vendorGstin.trim().toUpperCase() || 'Unregistered Local Vendor',
+        base_amount: Number(baseAmount),
+        gst_rate: Number(gstRate),
+        gst_paid: calculatedGstPaid,
+        total_amount: calculatedTotal,
+        gst_itc_eligible: itcEligible,
+        payment_mode: paymentMode,
+        paid_date: paidDate,
+        approval_status: 'APPROVED',
+        created_at: serverTimestamp(),
+      };
+
+      const docRef = await addDoc(collection(db, 'finance_expenses'), payload);
+      setExpenses((prev) => [{ id: docRef.id, ...payload }, ...prev]);
+      setIsNewExpenseOpen(false);
+      setPaidTo('');
+      setVendorGstin('');
+      setBaseAmount(0);
+      setVoucherNo('');
+      showToast('success', `Recorded voucher ${vNo} of ₹ ${calculatedTotal.toLocaleString('en-IN')}`);
+    } catch (err: any) {
+      console.error('Error recording expense:', err);
+      showToast('error', err.message || 'Failed to save expense voucher');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Delete Expense
+  const handleDeleteExpense = async () => {
+    if (!itemToDelete) return;
+    try {
+      setSaving(true);
+      await deleteDoc(doc(db, 'finance_expenses', itemToDelete.id));
+      setExpenses((prev) => prev.filter((e) => e.id !== itemToDelete.id));
+      showToast('success', `Deleted voucher #${itemToDelete.voucher_no}`);
+      setItemToDelete(null);
+    } catch (err: any) {
+      console.error('Error deleting expense:', err);
+      showToast('error', err.message || 'Failed to delete expense');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // KPI Calculations
+  const totalExpenseVal = expenses.reduce((acc, curr) => acc + (Number(curr.total_amount) || 0), 0);
+  const totalItcClaimable = expenses
     .filter((e) => e.gst_itc_eligible)
-    .reduce((acc, curr) => acc + curr.gst_paid, 0);
+    .reduce((acc, curr) => acc + (Number(curr.gst_paid) || 0), 0);
+  const nonItcAmount = expenses
+    .filter((e) => !e.gst_itc_eligible)
+    .reduce((acc, curr) => acc + (Number(curr.total_amount) || 0), 0);
+  const pendingApprovals = expenses.filter((e) => e.approval_status === 'PENDING').length;
+
+  const filteredExpenses = expenses.filter((item) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      (item.expense_head || '').toLowerCase().includes(q) ||
+      (item.paid_to || '').toLowerCase().includes(q) ||
+      (item.voucher_no || '').toLowerCase().includes(q) ||
+      (item.vendor_gstin || '').toLowerCase().includes(q) ||
+      (item.payment_mode || '').toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0">
-      <TabBar title="showroom_expenses" />
+      <TabBar title="showroom_operating_expenses" />
       <ActionToolbar
-        filterPlaceholder="Filter by voucher #, expense head, vendor GSTIN, entity..."
-        insertLabel="Record Showroom Expense"
-        onInsertClick={() => setIsRecordModalOpen(true)}
+        filterPlaceholder="Filter by voucher #, payee, GSTIN, expense head..."
+        insertLabel="Record Expense"
+        onInsertClick={() => setIsNewExpenseOpen(true)}
+        onRefresh={fetchExpenses}
       />
 
+      <FinanceNavigationHeader activePage="expenses" />
+
+      {/* Real-time Toast Banner */}
       {toastMessage && (
-        <div className="fixed top-12 right-6 z-50 bg-neutral-900 text-white text-xs px-4 py-2.5 rounded-lg shadow-lg flex items-center gap-2 border border-neutral-700 animate-in fade-in slide-in-from-top-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          <span>{toastMessage}</span>
+        <div
+          className={`px-4 py-2 text-xs flex items-center justify-between transition-all shrink-0 ${
+            toastMessage.type === 'success'
+              ? 'bg-emerald-50 text-emerald-800 border-b border-emerald-200'
+              : 'bg-red-50 text-red-800 border-b border-red-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {toastMessage.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+            )}
+            <span className="font-medium">{toastMessage.text}</span>
+          </div>
+          <button
+            onClick={() => setToastMessage(null)}
+            className="text-neutral-400 hover:text-neutral-700 p-0.5"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
       <div className="flex-1 overflow-y-auto bg-[#fafafa] flex flex-col custom-scrollbar w-full">
-        {/* KPI Metrics */}
-        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white">
+        {/* KPI Metrics Cards */}
+        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white shrink-0">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
               <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Expenses This Month</span>
+                <span className="text-[11px] font-medium uppercase tracking-wider">Total Expenses</span>
                 <Receipt className="w-3.5 h-3.5 text-blue-600" />
               </div>
-              <div className="text-xl font-medium text-neutral-900 font-mono">₹ 3,42,000</div>
-              <div className="text-[11px] text-neutral-500 mt-1">October 2026 Store Ops</div>
+              <div className="text-xl font-medium text-neutral-900 font-mono">
+                ₹ {totalExpenseVal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+              <div className="text-[11px] text-neutral-500 mt-1">Operating overheads paid</div>
+            </div>
+
+            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Eligible Input ITC</span>
+                <FileCheck className="w-3.5 h-3.5 text-emerald-600" />
+              </div>
+              <div className="text-xl font-medium text-emerald-700 font-mono">
+                ₹ {totalItcClaimable.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+              <div className="text-[11px] text-emerald-600 mt-1">Offset against 3% GST output</div>
+            </div>
+
+            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Non-ITC Overheads</span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-amber-600" />
+              </div>
+              <div className="text-xl font-medium text-amber-700 font-mono">
+                ₹ {nonItcAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+              <div className="text-[11px] text-neutral-500 mt-1">Power bills & petty cash</div>
             </div>
 
             <div className="p-3.5 rounded-lg bg-emerald-50/50 border border-emerald-200 hover:border-emerald-300 transition-colors shadow-2xs">
               <div className="flex items-center justify-between text-emerald-800 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Eligible GST ITC Credit</span>
-                <FileCheck className="w-3.5 h-3.5 text-emerald-700" />
+                <span className="text-[11px] font-medium uppercase tracking-wider">Approval Status</span>
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
               </div>
-              <div className="text-xl font-medium text-emerald-900 font-mono">₹ 61,560</div>
-              <div className="text-[11px] text-emerald-700 mt-1">Offset against 3% jewellery GST</div>
-            </div>
-
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-amber-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Rent & Security</span>
-                <Shield className="w-3.5 h-3.5 text-amber-500" />
+              <div className="text-xl font-medium text-emerald-900 font-mono">
+                {expenses.length - pendingApprovals} / {expenses.length}{' '}
+                <span className="text-xs text-emerald-700 font-sans font-medium">Approved</span>
               </div>
-              <div className="text-xl font-medium text-neutral-900 font-mono">₹ 1,85,000</div>
-              <div className="text-[11px] text-neutral-500 mt-1">Armed guards + biometric vault</div>
-            </div>
-
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Utilities & Maintenance</span>
-                <Zap className="w-3.5 h-3.5 text-purple-600" />
+              <div className="text-[11px] text-emerald-700 mt-1 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                {pendingApprovals > 0 ? `${pendingApprovals} pending review` : 'All audited & approved'}
               </div>
-              <div className="text-xl font-medium text-neutral-900 font-mono">₹ 95,440</div>
-              <div className="text-[11px] text-neutral-500 mt-1">HVAC chillers & power tariff</div>
             </div>
           </div>
         </div>
 
-        {/* Supabase-style Table */}
+        {/* Expenses Table or Empty State */}
         <div className="p-4 sm:p-5 flex-1 flex flex-col">
-          <div className="bg-white border border-[#e5e7eb] rounded-lg shadow-2xs overflow-hidden flex flex-col flex-1">
-            <div className="px-4 py-2.5 border-b border-[#e5e7eb] bg-[#f8fafc] flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-emerald-600" />
-                <span className="font-mono font-medium text-neutral-800">
-                  public.showroom_expenses
-                </span>
-                <span className="text-neutral-400">•</span>
-                <span className="text-neutral-500">
-                  Showing {expenses.length} store overhead vouchers
-                </span>
-              </div>
-
-              <div className="flex items-center bg-neutral-200/60 p-0.5 rounded border border-neutral-300/60 text-[13px]">
-                <button
-                  onClick={() => setActiveTab('data')}
-                  className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
-                    activeTab === 'data'
-                      ? 'bg-white text-neutral-900 shadow-2xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  Data
-                </button>
-                <button
-                  onClick={() => setActiveTab('definition')}
-                  className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
-                    activeTab === 'definition'
-                      ? 'bg-white text-neutral-900 shadow-2xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  Definition
-                </button>
-              </div>
+          {loading ? (
+            <div className="py-20 flex flex-col items-center justify-center text-neutral-500">
+              <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mb-3" />
+              <p className="text-xs font-medium">Loading live expense records...</p>
             </div>
-
-            {activeTab === 'data' && (
-              <div className="flex-1 overflow-x-auto custom-scrollbar w-full">
+          ) : filteredExpenses.length === 0 ? (
+            <div className="py-16 flex flex-col items-center justify-center text-center p-8 bg-white rounded-lg border border-[#e5e7eb] shadow-2xs">
+              <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 mb-3">
+                <Receipt className="w-6 h-6" />
+              </div>
+              <h3 className="text-sm font-medium text-neutral-900 mb-1">No Expense Vouchers Found</h3>
+              <p className="text-xs text-neutral-500 max-w-sm mb-4">
+                {searchQuery
+                  ? 'No expense vouchers match your filter. Try clearing the search.'
+                  : 'Record showroom utility bills, armed security agency invoices, vault insurance, and assaying fees.'}
+              </p>
+              <button
+                onClick={() => setIsNewExpenseOpen(true)}
+                className="px-3.5 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Record First Expense</span>
+              </button>
+            </div>
+          ) : (
+            <div className="border border-[#e5e7eb] rounded-lg bg-white overflow-hidden shadow-2xs">
+              <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="bg-[#fcfcfc] border-b border-[#e5e7eb] text-neutral-600 font-mono text-[11px]">
-                      <th className="w-10 px-3 py-2 border-r border-[#e5e7eb] text-center">
-                        <input
-                          type="checkbox"
-                          className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                        />
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">voucher_no</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">expense_head</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">paid_to / vendor</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">vendor_gstin</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <span className="text-neutral-800">base_amount (₹)</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <span className="text-neutral-800">gst_paid (₹)</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <span className="text-neutral-800">total_amount (₹)</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-center">
-                        <span className="text-neutral-800">gst_itc_status</span>
-                      </th>
-                      <th className="px-3 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <span className="text-neutral-800">paid_date</span>
-                      </th>
-                      <th className="w-16 px-3 py-2 text-center font-medium">uuid</th>
+                    <tr className="bg-[#f8fafc] border-b border-[#e2e8f0] text-neutral-500 uppercase tracking-wider text-[11px]">
+                      <th className="py-2.5 px-3 font-medium">Voucher #</th>
+                      <th className="py-2.5 px-3 font-medium">Expense Head</th>
+                      <th className="py-2.5 px-3 font-medium">Paid To / Vendor</th>
+                      <th className="py-2.5 px-3 font-medium">GSTIN</th>
+                      <th className="py-2.5 px-3 font-medium text-right">Base Amount (₹)</th>
+                      <th className="py-2.5 px-3 font-medium text-right">GST Paid (₹)</th>
+                      <th className="py-2.5 px-3 font-medium text-right">Total Amount (₹)</th>
+                      <th className="py-2.5 px-3 font-medium text-center">ITC Eligible</th>
+                      <th className="py-2.5 px-3 font-medium text-center">Status</th>
+                      <th className="py-2.5 px-3 font-medium text-center">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#e5e7eb] text-neutral-800 font-mono">
-                    {expenses.map((row) => (
-                      <tr key={row.id} className="hover:bg-neutral-50/80 transition-colors">
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] text-center">
-                          <input
-                            type="checkbox"
-                            className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                          />
+                  <tbody className="divide-y divide-[#e2e8f0] text-neutral-700">
+                    {filteredExpenses.map((row) => (
+                      <tr key={row.id} className="hover:bg-neutral-50/70 transition-colors">
+                        <td className="py-2 px-3 font-mono font-medium text-neutral-900 whitespace-nowrap">
+                          <button
+                            onClick={() => copyToClipboard(row.voucher_no, row.id)}
+                            className="inline-flex items-center gap-1 hover:text-emerald-700 cursor-pointer"
+                            title="Copy Voucher #"
+                          >
+                            <span>{row.voucher_no}</span>
+                            {copiedId === row.id ? (
+                              <Check className="w-3 h-3 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-2.5 h-2.5 text-neutral-400 opacity-60" />
+                            )}
+                          </button>
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-700">
-                          {row.voucher_no}
-                        </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap font-sans text-neutral-900">
+                        <td className="py-2 px-3 font-medium text-neutral-800 whitespace-nowrap">
                           {row.expense_head}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] font-sans text-neutral-900 max-w-xs truncate">
+                        <td className="py-2 px-3 text-neutral-700 max-w-xs truncate" title={row.paid_to}>
                           {row.paid_to}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-500">
+                        <td className="py-2 px-3 font-mono text-[11px] text-neutral-500 whitespace-nowrap">
                           {row.vendor_gstin}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-right text-neutral-700">
+                        <td className="py-2 px-3 font-mono text-neutral-800 text-right whitespace-nowrap">
                           ₹ {row.base_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-right text-amber-700">
+                        <td className="py-2 px-3 font-mono text-neutral-500 text-right whitespace-nowrap">
                           ₹ {row.gst_paid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-right font-medium text-neutral-900">
+                        <td className="py-2 px-3 font-mono font-medium text-neutral-900 text-right whitespace-nowrap">
                           ₹ {row.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-center">
+                        <td className="py-2 px-3 text-center whitespace-nowrap">
                           {row.gst_itc_eligible ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> ITC CLAIMABLE
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              YES
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-neutral-100 text-neutral-600 border border-neutral-200">
-                              NO ITC / EXEMPT
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-neutral-100 text-neutral-500 border border-neutral-200">
+                              NO
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2.5 border-r border-[#e5e7eb] whitespace-nowrap text-neutral-600">
-                          {row.paid_date}
-                        </td>
-                        <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                        <td className="py-2 px-3 text-center whitespace-nowrap">
                           <button
-                            onClick={() => copyToClipboard(row.id, row.id)}
-                            className="p-1 text-neutral-400 hover:text-neutral-700 transition-colors"
-                            title="Copy UUID"
+                            onClick={() => handleToggleApproval(row.id, row.approval_status)}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                              row.approval_status === 'APPROVED'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
+                            }`}
+                            title="Click to toggle approval"
                           >
-                            {copiedId === row.id ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            {row.approval_status === 'APPROVED' ? (
+                              <>
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                <span>Approved</span>
+                              </>
                             ) : (
-                              <Copy className="w-3.5 h-3.5" />
+                              <>
+                                <Clock className="w-3 h-3 text-amber-600" />
+                                <span>Pending</span>
+                              </>
                             )}
+                          </button>
+                        </td>
+                        <td className="py-2 px-3 text-center whitespace-nowrap">
+                          <button
+                            onClick={() => setItemToDelete(row)}
+                            className="p-1 rounded text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                            title="Delete voucher"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </td>
                       </tr>
@@ -371,223 +441,218 @@ export function FinanceExpensesView() {
                   </tbody>
                 </table>
               </div>
-            )}
-
-            {activeTab === 'definition' && (
-              <div className="p-4 bg-[#0a0a0a] text-neutral-200 font-mono text-xs overflow-x-auto">
-                <div className="leading-relaxed">
-                  <span className="text-emerald-400">CREATE TABLE</span> public.showroom_expenses (
-                  <br />
-                  &nbsp;&nbsp;id <span className="text-purple-400">UUID</span>{' '}
-                  <span className="text-neutral-400">PRIMARY KEY DEFAULT gen_random_uuid()</span>,
-                  <br />
-                  &nbsp;&nbsp;voucher_no <span className="text-purple-400">VARCHAR(50)</span>{' '}
-                  <span className="text-neutral-400">UNIQUE NOT NULL</span>,
-                  <br />
-                  &nbsp;&nbsp;expense_head <span className="text-purple-400">VARCHAR(100)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL</span>,
-                  <br />
-                  &nbsp;&nbsp;paid_to <span className="text-purple-400">VARCHAR(150)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL</span>,
-                  <br />
-                  &nbsp;&nbsp;vendor_gstin <span className="text-purple-400">VARCHAR(20)</span>,
-                  <br />
-                  &nbsp;&nbsp;base_amount <span className="text-purple-400">NUMERIC(10,2)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL</span>,
-                  <br />
-                  &nbsp;&nbsp;gst_paid <span className="text-purple-400">NUMERIC(10,2)</span>{' '}
-                  <span className="text-neutral-400">DEFAULT 0.00</span>,
-                  <br />
-                  &nbsp;&nbsp;total_amount <span className="text-purple-400">NUMERIC(10,2)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL</span>,
-                  <br />
-                  &nbsp;&nbsp;gst_itc_eligible <span className="text-purple-400">BOOLEAN</span>{' '}
-                  <span className="text-neutral-400">DEFAULT TRUE</span>,
-                  <br />
-                  &nbsp;&nbsp;payment_mode <span className="text-purple-400">VARCHAR(20)</span>{' '}
-                  <span className="text-neutral-400">DEFAULT &apos;Bank Transfer&apos;</span>,
-                  <br />
-                  &nbsp;&nbsp;paid_date <span className="text-purple-400">DATE</span>{' '}
-                  <span className="text-neutral-400">DEFAULT CURRENT_DATE</span>
-                  <br />
-                  );
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Drawer: Record Showroom Expense */}
-      {isRecordModalOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-2xs transition-all">
-          <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col justify-between overflow-y-auto">
-            <div>
-              <div className="px-5 py-4 border-b border-[#e5e7eb] flex items-center justify-between bg-[#f8fafc]">
-                <div className="flex items-center gap-2">
-                  <Receipt className="w-4 h-4 text-emerald-600" />
-                  <h3 className="text-sm font-medium text-neutral-900">
-                    Record Showroom Expense Voucher
-                  </h3>
-                </div>
-                <button
-                  onClick={() => setIsRecordModalOpen(false)}
-                  className="p-1 hover:bg-neutral-200/60 rounded text-neutral-400 hover:text-neutral-700"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+      {/* MODAL: Record Expense Voucher */}
+      {isNewExpenseOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="p-4 bg-[#f8fafc] border-b border-[#e2e8f0] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-xs font-medium text-neutral-900 uppercase tracking-wider">
+                  Record Showroom Expense Voucher
+                </h3>
               </div>
+              <button
+                onClick={() => setIsNewExpenseOpen(false)}
+                className="text-neutral-400 hover:text-neutral-700 p-1 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-              <form onSubmit={handleRecordExpense} className="p-5 space-y-4">
+            <form onSubmit={handleCreateExpense} className="p-5 space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Expense Category Head
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Expense Head *
                   </label>
                   <select
                     value={expenseHead}
                     onChange={(e) => setExpenseHead(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
                   >
-                    <option value="Showroom Security Agency">Showroom Security Agency</option>
-                    <option value="Electricity Bill & High-Tension Power">Electricity Bill & High-Tension Power</option>
-                    <option value="Vault Insurance Premium">Vault Insurance Premium (Jewellers Block)</option>
-                    <option value="Marketing & Hoardings">Marketing & Hoardings</option>
-                    <option value="Staff Welfare / Tea">Staff Welfare / Tea</option>
-                    <option value="Housekeeping & Cleaning">Housekeeping & Cleaning</option>
+                    {EXPENSE_HEADS.map((head) => (
+                      <option key={head} value={head}>
+                        {head}
+                      </option>
+                    ))}
                   </select>
                 </div>
-
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Vendor / Payee Name
-                  </label>
-                  <input
-                    type="text"
-                    value={vendorName}
-                    onChange={(e) => setVendorName(e.target.value)}
-                    placeholder="e.g. SIS Security Ltd or CoolAir HVAC"
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Vendor GSTIN (For ITC GSTR-2B Claim)
-                  </label>
-                  <input
-                    type="text"
-                    value={vendorGstin}
-                    onChange={(e) => setVendorGstin(e.target.value.toUpperCase())}
-                    placeholder="e.g. 36AABCS1429B1Z0"
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                      Base Amount (₹)
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={baseAmount || ''}
-                      onChange={(e) => setBaseAmount(Number(e.target.value))}
-                      className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                      GST Applicable
-                    </label>
-                    <select
-                      value={gstRate}
-                      onChange={(e) => setGstRate(Number(e.target.value))}
-                      className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
-                    >
-                      <option value={18}>18% GST (Services)</option>
-                      <option value={12}>12% GST (Goods)</option>
-                      <option value={0}>0% / Exempt / Non-GST</option>
-                    </select>
-                  </div>
-                </div>
-
-                {baseAmount > 0 && (
-                  <div className="p-3 bg-neutral-50 rounded border border-neutral-200 text-xs space-y-1 font-mono">
-                    <div className="flex justify-between text-neutral-600">
-                      <span>GST Component:</span>
-                      <span>₹ {calculatedGst.toLocaleString('en-IN')}</span>
-                    </div>
-                    <div className="flex justify-between text-neutral-900 font-medium">
-                      <span>Total Invoice Payable:</span>
-                      <span>₹ {totalCalculated.toLocaleString('en-IN')}</span>
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
-                    Input Tax Credit (ITC) Eligibility
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsItcEligible(true)}
-                      className={`flex-1 py-1.5 px-2 rounded text-xs border transition-colors ${
-                        isItcEligible
-                          ? 'bg-emerald-50 border-emerald-300 text-emerald-800 font-medium'
-                          : 'bg-white border-[#e2e8f0] text-neutral-600'
-                      }`}
-                    >
-                      YES - Eligible for ITC
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsItcEligible(false)}
-                      className={`flex-1 py-1.5 px-2 rounded text-xs border transition-colors ${
-                        !isItcEligible
-                          ? 'bg-neutral-100 border-neutral-300 text-neutral-800 font-medium'
-                          : 'bg-white border-[#e2e8f0] text-neutral-600'
-                      }`}
-                    >
-                      NO - Blocked / Exempt
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
                     Payment Mode
                   </label>
                   <select
                     value={paymentMode}
-                    onChange={(e) => setPaymentMode(e.target.value as any)}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
+                    onChange={(e) => setPaymentMode(e.target.value as ShowroomExpense['payment_mode'])}
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
                   >
-                    <option value="Bank Transfer">Bank Transfer (HDFC Current)</option>
-                    <option value="Petty Cash">Counter Petty Cash Drawer</option>
+                    <option value="Bank Transfer">Bank Transfer (NEFT/RTGS)</option>
+                    <option value="Petty Cash">Petty Cash Counter</option>
+                    <option value="UPI / Card">UPI / Corporate Card</option>
                   </select>
                 </div>
+              </div>
 
-                <div className="pt-2 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsRecordModalOpen(false)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-2xs cursor-pointer"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    Record Expense
-                  </button>
+              <div>
+                <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                  Paid To / Vendor Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. SIS India Armed Security Ltd / TSSPDCL Power"
+                  value={paidTo}
+                  onChange={(e) => setPaidTo(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Vendor GSTIN (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="36AAACS1234F1Z5"
+                    value={vendorGstin}
+                    onChange={(e) => setVendorGstin(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded font-mono uppercase focus:border-emerald-500 focus:bg-white focus:outline-none"
+                  />
                 </div>
-              </form>
+                <div>
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Payment Date
+                  </label>
+                  <input
+                    type="date"
+                    value={paidDate}
+                    onChange={(e) => setPaidDate(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Base Amount (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.01"
+                    required
+                    value={baseAmount || ''}
+                    onChange={(e) => setBaseAmount(parseFloat(e.target.value) || 0)}
+                    placeholder="0.00"
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded font-mono font-medium focus:border-emerald-500 focus:bg-white focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-neutral-600 mb-1">
+                    Applicable GST Rate
+                  </label>
+                  <select
+                    value={gstRate}
+                    onChange={(e) => setGstRate(parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-1.5 bg-[#f8fafc] border border-[#e2e8f0] rounded focus:border-emerald-500 focus:bg-white focus:outline-none"
+                  >
+                    <option value={18}>18% (Services, Security, AMC)</option>
+                    <option value={12}>12% (Equipment Maintenance)</option>
+                    <option value={5}>5% (Essential Supplies)</option>
+                    <option value={0}>0% Exempt (Electricity, Chai, Wages)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Dynamic Live Tax Preview */}
+              <div className="p-3 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] space-y-1.5 text-[11px]">
+                <div className="flex justify-between text-neutral-600">
+                  <span>Base Taxable Amount:</span>
+                  <span className="font-mono">₹ {baseAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between text-neutral-600">
+                  <span>GST Paid ({gstRate}%):</span>
+                  <span className="font-mono text-emerald-700">+ ₹ {calculatedGstPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between font-medium text-neutral-900 pt-1 border-t border-[#e2e8f0]">
+                  <span>Total Voucher Payable:</span>
+                  <span className="font-mono text-sm text-neutral-900">₹ {calculatedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="itcCheck"
+                  checked={itcEligible}
+                  onChange={(e) => setItcEligible(e.target.checked)}
+                  className="rounded text-emerald-600 focus:ring-emerald-500"
+                />
+                <label htmlFor="itcCheck" className="text-[11px] text-neutral-700 font-medium cursor-pointer">
+                  Eligible for GST Input Tax Credit (ITC claim against jewellery tax liability)
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#e2e8f0]">
+                <button
+                  type="button"
+                  onClick={() => setIsNewExpenseOpen(false)}
+                  className="px-3 py-1.5 rounded border border-[#e2e8f0] text-neutral-600 hover:bg-neutral-50 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>Save Expense Voucher</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Delete Confirmation */}
+      {itemToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-xl w-full max-w-sm p-5 space-y-3 animate-in fade-in zoom-in-95">
+            <div className="w-10 h-10 rounded-full bg-red-50 border border-red-200 flex items-center justify-center text-red-600 mx-auto">
+              <Trash2 className="w-5 h-5" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-sm font-medium text-neutral-900">Delete Expense Voucher?</h3>
+              <p className="text-xs text-neutral-500 mt-1">
+                Are you sure you want to delete voucher <span className="font-mono font-medium text-neutral-800">#{itemToDelete.voucher_no}</span> (₹ {itemToDelete.total_amount.toLocaleString('en-IN')}) for {itemToDelete.paid_to}?
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setItemToDelete(null)}
+                className="px-3 py-1.5 rounded border border-[#e2e8f0] text-neutral-600 hover:bg-neutral-50 font-medium text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteExpense}
+                disabled={saving}
+                className="px-4 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white font-medium text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                <span>Delete Voucher</span>
+              </button>
             </div>
           </div>
         </div>
