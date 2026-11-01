@@ -1,37 +1,101 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
-import { Tag, Check, Save, Printer } from 'lucide-react';
+import { Tag, Check, Save, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { db } from '@/lib/firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
-const TEMPLATES = [
-  { id: 'dumbbell', name: 'Dumbbell Jewellery Tag', dims: '68×12mm', fields: 8, driver: 'ZPL', icon: '🏷️' },
-  { id: 'rattail', name: 'Rat-Tail Tag', dims: '50×10mm', fields: 6, driver: 'TSPL', icon: '🔖' },
-  { id: 'butterfly', name: 'Butterfly Tag', dims: '40×25mm', fields: 10, driver: 'ZPL', icon: '🦋' },
-  { id: 'coin', name: 'Coin Label', dims: '30×30mm', fields: 5, driver: 'EPL', icon: '🪙' },
+const BASE_TEMPLATES = [
+  { id: 'dumbbell', name: 'Dumbbell Jewellery Tag', dims: '68×12mm', defaultDriver: 'ZPL', icon: '🏷️' },
+  { id: 'rattail', name: 'Rat-Tail Tag', dims: '50×10mm', defaultDriver: 'TSPL', icon: '🔖' },
+  { id: 'butterfly', name: 'Butterfly Tag', dims: '40×25mm', defaultDriver: 'ZPL', icon: '🦋' },
+  { id: 'coin', name: 'Coin / Bullion Label', dims: '30×30mm', defaultDriver: 'EPL', icon: '🪙' },
 ];
 
 const ALL_FIELDS = [
   'Tag Number', 'Item Name', 'Gross Weight', 'Net Weight',
-  'Purity/Karat', 'HUID Code', 'QR Code', 'Barcode 1D',
-  'Price (MRP)', 'Metal Type', 'Stone Details'
+  'Purity / Karat', 'HUID Code', 'QR Code', 'Barcode 1D',
+  'Price (MRP)', 'Metal Type', 'Stone Details', 'Shop Name'
 ];
 
 export function SettingsBarcodeTemplatesView() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [statusMessage, setStatusMessage] = useState('');
+
+  // Dynamic state — clean empty values
   const [activeTemplate, setActiveTemplate] = useState('dumbbell');
   const [defaultTemplate, setDefaultTemplate] = useState('dumbbell');
-  const [labelWidth, setLabelWidth] = useState('68');
-  const [labelHeight, setLabelHeight] = useState('12');
+  const [labelWidth, setLabelWidth] = useState('');
+  const [labelHeight, setLabelHeight] = useState('');
   const [driver, setDriver] = useState('ZPL');
-  const [selectedFields, setSelectedFields] = useState<string[]>([
-    'Tag Number','Item Name','Gross Weight','Net Weight','Purity/Karat','HUID Code','QR Code','Barcode 1D'
-  ]);
-  const [qrContent, setQrContent] = useState('Tag ID');
+  const [selectedFields, setSelectedFields] = useState<string[]>([]);
+  const [qrContent, setQrContent] = useState('');
   const [fontSize, setFontSize] = useState('Medium');
-  const [showShopName, setShowShopName] = useState(true);
+  const [showShopName, setShowShopName] = useState(false);
+
+  useEffect(() => {
+    async function loadBarcodeSettings() {
+      try {
+        setLoading(true);
+        const docRef = doc(db, 'settings', 'barcode-templates');
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.activeTemplate !== undefined) setActiveTemplate(data.activeTemplate);
+          if (data.defaultTemplate !== undefined) setDefaultTemplate(data.defaultTemplate);
+          if (data.labelWidth !== undefined) setLabelWidth(data.labelWidth);
+          if (data.labelHeight !== undefined) setLabelHeight(data.labelHeight);
+          if (data.driver !== undefined) setDriver(data.driver);
+          if (data.selectedFields !== undefined) setSelectedFields(data.selectedFields);
+          if (data.qrContent !== undefined) setQrContent(data.qrContent);
+          if (data.fontSize !== undefined) setFontSize(data.fontSize);
+          if (data.showShopName !== undefined) setShowShopName(data.showShopName);
+        }
+      } catch (err: any) {
+        console.error('Error fetching barcode template settings:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadBarcodeSettings();
+  }, []);
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      setSaveStatus('idle');
+      const docRef = doc(db, 'settings', 'barcode-templates');
+      await setDoc(docRef, {
+        activeTemplate,
+        defaultTemplate,
+        labelWidth,
+        labelHeight,
+        driver,
+        selectedFields,
+        qrContent,
+        fontSize,
+        showShopName,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      setSaveStatus('success');
+      setStatusMessage('Barcode template configuration saved successfully!');
+      setTimeout(() => setSaveStatus('idle'), 4000);
+    } catch (err: any) {
+      console.error('Error saving barcode settings:', err);
+      setSaveStatus('error');
+      setStatusMessage(err.message || 'Failed to save barcode template');
+      setTimeout(() => setSaveStatus('idle'), 5000);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const inputClass =
-    'w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 placeholder:text-neutral-400 transition-colors';
+    'w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 placeholder:text-neutral-400 transition-colors font-medium';
   const labelClass = 'text-xs font-medium text-neutral-700 mb-1';
   const sectionClass =
     'p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs';
@@ -49,181 +113,192 @@ export function SettingsBarcodeTemplatesView() {
       <TabBar title="settings_barcode_templates" />
       <ActionToolbar
         filterPlaceholder="Filter barcode templates..."
-        insertLabel="Save Template"
-        onInsertClick={() => {}}
+        insertLabel={saving ? 'Saving...' : 'Save Template'}
+        onInsertClick={handleSave}
       />
       <div className="flex-1 overflow-y-auto bg-[#fafafa] flex flex-col custom-scrollbar w-full">
         <div className="p-4 flex flex-col gap-4 max-w-5xl w-full mx-auto">
 
-          {/* Template Gallery */}
-          <div className={sectionClass}>
-            <div className={sectionHeader}>
-              <Tag className="w-3.5 h-3.5 text-emerald-600" />
-              Template Gallery
+          {/* Status Toast / Alert */}
+          {saveStatus === 'success' && (
+            <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{statusMessage}</span>
             </div>
-            <div className="grid grid-cols-4 gap-3">
-              {TEMPLATES.map(t => (
-                <div
-                  key={t.id}
-                  onClick={() => { setActiveTemplate(t.id); setDriver(t.driver); }}
-                  className={`relative rounded-lg border p-3 cursor-pointer transition-all ${activeTemplate === t.id ? 'border-emerald-400 bg-emerald-50' : 'border-[#e2e8f0] bg-white hover:border-emerald-200'}`}
-                >
-                  {defaultTemplate === t.id && (
-                    <span className="absolute top-2 right-2 text-[9px] font-medium bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200">
-                      DEFAULT
-                    </span>
-                  )}
-                  <div className="text-2xl mb-2">{t.icon}</div>
-                  <div className="text-xs font-medium text-neutral-800">{t.name}</div>
-                  <div className="text-[10px] text-neutral-500 mt-0.5">{t.dims}</div>
-                  <div className="text-[10px] text-neutral-500">{t.fields} fields • {t.driver}</div>
-                  {defaultTemplate !== t.id && (
-                    <button
-                      onClick={e => { e.stopPropagation(); setDefaultTemplate(t.id); }}
-                      className="mt-2 text-[10px] text-emerald-600 hover:text-emerald-700 font-medium"
+          )}
+          {saveStatus === 'error' && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <span>{statusMessage}</span>
+            </div>
+          )}
+
+          {loading ? (
+            <div className="p-12 flex flex-col items-center justify-center gap-2 text-neutral-500">
+              <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+              <span className="text-xs font-medium">Loading barcode template settings...</span>
+            </div>
+          ) : (
+            <>
+              {/* Template Gallery */}
+              <div className={sectionClass}>
+                <div className={sectionHeader}>
+                  <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                  Jewellery Tag Format Styles
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {BASE_TEMPLATES.map(t => (
+                    <div
+                      key={t.id}
+                      onClick={() => {
+                        setActiveTemplate(t.id);
+                        setDriver(t.defaultDriver);
+                      }}
+                      className={`relative rounded-lg border p-3 cursor-pointer transition-all ${
+                        activeTemplate === t.id
+                          ? 'border-emerald-400 bg-emerald-50'
+                          : 'border-[#e2e8f0] bg-white hover:border-emerald-200'
+                      }`}
                     >
-                      Set Default
-                    </button>
-                  )}
-                  {activeTemplate === t.id && (
-                    <div className="absolute bottom-2 right-2">
-                      <Check className="w-3.5 h-3.5 text-emerald-500" />
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Template Designer */}
-          <div className="grid grid-cols-5 gap-4">
-            <div className="col-span-3 flex flex-col gap-4">
-              <div className={sectionClass}>
-                <div className={sectionHeader}>
-                  <Tag className="w-3.5 h-3.5 text-emerald-600" />
-                  Template Designer — {TEMPLATES.find(t => t.id === activeTemplate)?.name}
-                </div>
-
-                <div className="grid grid-cols-3 gap-3 mb-3">
-                  <div>
-                    <div className={labelClass}>Width (mm)</div>
-                    <input className={inputClass} value={labelWidth} onChange={e => setLabelWidth(e.target.value)} type="number" />
-                  </div>
-                  <div>
-                    <div className={labelClass}>Height (mm)</div>
-                    <input className={inputClass} value={labelHeight} onChange={e => setLabelHeight(e.target.value)} type="number" />
-                  </div>
-                  <div>
-                    <div className={labelClass}>Printer Driver</div>
-                    <select className={inputClass} value={driver} onChange={e => setDriver(e.target.value)}>
-                      {['ZPL','TSPL','EPL'].map(d => <option key={d}>{d}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="mb-3">
-                  <div className={`${labelClass} mb-2`}>Fields to Include</div>
-                  <div className="flex flex-wrap gap-2">
-                    {ALL_FIELDS.map(field => (
-                      <button
-                        key={field}
-                        onClick={() => toggleField(field)}
-                        className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-medium border transition-colors ${selectedFields.includes(field) ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'bg-white text-neutral-600 border-[#e2e8f0] hover:border-emerald-200'}`}
-                      >
-                        {selectedFields.includes(field) && <Check className="w-2.5 h-2.5" />}
-                        {field}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div className={labelClass}>QR Code Content</div>
-                    <select className={inputClass} value={qrContent} onChange={e => setQrContent(e.target.value)}>
-                      {['Tag ID','Full Item URL','HUID'].map(q => <option key={q}>{q}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <div className={labelClass}>Font Size</div>
-                    <div className="flex gap-2">
-                      {['Small','Medium','Large'].map(s => (
+                      {defaultTemplate === t.id && (
+                        <span className="absolute top-2 right-2 text-[9px] font-medium bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200">
+                          DEFAULT
+                        </span>
+                      )}
+                      <div className="text-2xl mb-2">{t.icon}</div>
+                      <div className="text-xs font-medium text-neutral-800">{t.name}</div>
+                      <div className="text-[10px] text-neutral-500 mt-0.5">{t.dims}</div>
+                      <div className="text-[10px] text-neutral-500">{t.defaultDriver} Language</div>
+                      {defaultTemplate !== t.id && (
                         <button
-                          key={s}
-                          onClick={() => setFontSize(s)}
-                          className={`flex-1 py-2 text-[10px] font-medium rounded border transition-colors ${fontSize === s ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-[#e2e8f0] bg-white text-neutral-600 hover:border-emerald-200'}`}
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setDefaultTemplate(t.id);
+                          }}
+                          className="mt-2 text-[10px] text-emerald-600 hover:text-emerald-700 font-medium"
                         >
-                          {s}
+                          Set Default
                         </button>
-                      ))}
+                      )}
+                      {activeTemplate === t.id && (
+                        <div className="absolute bottom-2 right-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        </div>
+                      )}
                     </div>
-                  </div>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between py-2 border-t border-[#e2e8f0]">
-                  <div>
-                    <div className="text-xs font-medium text-neutral-700">Show Shop Name on Tag</div>
-                    <div className="text-[11px] text-neutral-500">Print your brand name on each label</div>
-                  </div>
-                  <button
-                    onClick={() => setShowShopName(!showShopName)}
-                    className={`w-9 h-5 rounded-full transition-colors relative ${showShopName ? 'bg-emerald-500' : 'bg-neutral-200'}`}
-                  >
-                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-xs transition-all ${showShopName ? 'left-4' : 'left-0.5'}`} />
-                  </button>
+                  ))}
                 </div>
               </div>
-            </div>
 
-            {/* Preview Area */}
-            <div className="col-span-2">
+              {/* Template Properties */}
               <div className={sectionClass}>
                 <div className={sectionHeader}>
                   <Tag className="w-3.5 h-3.5 text-emerald-600" />
-                  Label Preview
+                  Dimensions &amp; Printer Driver
                 </div>
-                <div className="flex justify-center">
-                  <div
-                    className="border-2 border-dashed border-[#e2e8f0] rounded bg-white flex flex-col p-2 gap-1"
-                    style={{ width: `${Math.min(parseInt(labelWidth) * 3, 200)}px`, minHeight: `${Math.min(parseInt(labelHeight) * 3, 80)}px` }}
-                  >
-                    {showShopName && (
-                      <div className="text-[8px] text-center text-neutral-500 font-medium border-b border-dashed border-[#e2e8f0] pb-0.5">Sri Jewellers</div>
-                    )}
-                    {selectedFields.slice(0, 4).map(f => (
-                      <div key={f} className="text-[7px] text-neutral-600 flex justify-between">
-                        <span className="text-neutral-400">{f}:</span>
-                        <span className="font-medium">{f === 'Gross Weight' ? '12.340g' : f === 'HUID Code' ? 'XX1234AB' : f === 'Purity/Karat' ? '916 / 22K' : '---'}</span>
-                      </div>
-                    ))}
-                    {selectedFields.includes('QR Code') && (
-                      <div className="flex justify-center mt-1">
-                        <div className="w-8 h-8 bg-neutral-200 rounded flex items-center justify-center text-[6px] text-neutral-500">QR</div>
-                      </div>
-                    )}
-                    {selectedFields.includes('Barcode 1D') && (
-                      <div className="flex justify-center mt-0.5">
-                        <div className="w-full h-4 bg-gradient-to-r from-neutral-800 via-white to-neutral-800" style={{ backgroundImage: 'repeating-linear-gradient(90deg, #333 0px, #333 2px, white 2px, white 4px)' }} />
-                      </div>
-                    )}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <div className={labelClass}>Tag Width (mm)</div>
+                    <input
+                      className={inputClass}
+                      value={labelWidth}
+                      onChange={e => setLabelWidth(e.target.value)}
+                      placeholder="e.g. 68"
+                      type="number"
+                    />
+                  </div>
+                  <div>
+                    <div className={labelClass}>Tag Height (mm)</div>
+                    <input
+                      className={inputClass}
+                      value={labelHeight}
+                      onChange={e => setLabelHeight(e.target.value)}
+                      placeholder="e.g. 12"
+                      type="number"
+                    />
+                  </div>
+                  <div>
+                    <div className={labelClass}>Printer Language / Protocol</div>
+                    <select
+                      className={inputClass}
+                      value={driver}
+                      onChange={e => setDriver(e.target.value)}
+                    >
+                      <option value="ZPL">Zebra ZPL / ZPL II</option>
+                      <option value="TSPL">TSC TSPL / TSPL2</option>
+                      <option value="EPL">Eltron EPL</option>
+                      <option value="DPL">Datamax DPL</option>
+                    </select>
                   </div>
                 </div>
-                <div className="mt-3 flex justify-center">
-                  <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-[#e2e8f0] hover:bg-neutral-50 transition-colors shadow-2xs cursor-pointer">
-                    <Printer className="w-3.5 h-3.5" />
-                    Print Test Tag
-                  </button>
+              </div>
+
+              {/* Tag Fields Selection */}
+              <div className={sectionClass}>
+                <div className={sectionHeader}>
+                  <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                  Select Fields to Print on Label ({selectedFields.length} selected)
+                </div>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {ALL_FIELDS.map(f => {
+                    const isSelected = selectedFields.includes(f);
+                    return (
+                      <button
+                        key={f}
+                        type="button"
+                        onClick={() => toggleField(f)}
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+                          isSelected
+                            ? 'bg-emerald-50 border-emerald-400 text-emerald-700'
+                            : 'bg-white border-[#e2e8f0] text-neutral-600 hover:border-emerald-200'
+                        }`}
+                      >
+                        {isSelected ? '✓ ' : '+ '}
+                        {f}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[#e2e8f0]">
+                  <div>
+                    <div className={labelClass}>QR Code Payload Content</div>
+                    <input
+                      className={inputClass}
+                      value={qrContent}
+                      onChange={e => setQrContent(e.target.value)}
+                      placeholder="e.g. Tag ID, HUID, or Verification URL"
+                    />
+                  </div>
+                  <div>
+                    <div className={labelClass}>Tag Font Sizing</div>
+                    <select
+                      className={inputClass}
+                      value={fontSize}
+                      onChange={e => setFontSize(e.target.value)}
+                    >
+                      <option value="Small">Small (Compact font for micro dumbbell)</option>
+                      <option value="Medium">Medium (Balanced clarity)</option>
+                      <option value="Large">Large (Prominent text)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
 
-          <div className="flex justify-end">
-            <button className="flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-medium bg-neutral-900 text-white hover:bg-neutral-800 transition-colors shadow-2xs cursor-pointer">
-              <Save className="w-3.5 h-3.5" />
-              Save Barcode Templates
-            </button>
-          </div>
+              <div className="flex justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-medium bg-[#24b47e] text-white hover:bg-[#1fa070] disabled:opacity-50 transition-colors shadow-2xs cursor-pointer"
+                >
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  <span>{saving ? 'Saving...' : 'Save Barcode Template'}</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

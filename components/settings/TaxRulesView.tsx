@@ -1,27 +1,101 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
-import { Scale, AlertTriangle, Info, Save, Shield } from 'lucide-react';
+import { Scale, Info, Save, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { db } from '@/lib/firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 export function SettingsTaxRulesView() {
-  const [tcsRate, setTcsRate] = useState('1');
-  const [cashThreshold, setCashThreshold] = useState('200000');
-  const [enforcePAN, setEnforcePAN] = useState(true);
-  const [autoForm27EQ, setAutoForm27EQ] = useState(true);
-  const [tcsApplicable, setTcsApplicable] = useState<string[]>(['Gold', 'Silver', 'Diamond']);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [statusMessage, setStatusMessage] = useState('');
 
-  const [tdsRate, setTdsRate] = useState('0.1');
-  const [annualThreshold, setAnnualThreshold] = useState('5000000');
-  const [deductTDS, setDeductTDS] = useState(true);
-  const [supplierPANMandatory, setSupplierPANMandatory] = useState(true);
+  // Dynamic state — clean empty state
+  const [tcsRate, setTcsRate] = useState('');
+  const [cashThreshold, setCashThreshold] = useState('');
+  const [enforcePAN, setEnforcePAN] = useState(false);
+  const [autoForm27EQ, setAutoForm27EQ] = useState(false);
+  const [tcsApplicable, setTcsApplicable] = useState<string[]>([]);
 
-  const [maxCashPerTx, setMaxCashPerTx] = useState('199999');
-  const [requireIDAbove, setRequireIDAbove] = useState('50000');
-  const [alertOnBreach, setAlertOnBreach] = useState(true);
+  const [tdsRate, setTdsRate] = useState('');
+  const [annualThreshold, setAnnualThreshold] = useState('');
+  const [deductTDS, setDeductTDS] = useState(false);
+  const [supplierPANMandatory, setSupplierPANMandatory] = useState(false);
+
+  const [maxCashPerTx, setMaxCashPerTx] = useState('');
+  const [requireIDAbove, setRequireIDAbove] = useState('');
+  const [alertOnBreach, setAlertOnBreach] = useState(false);
+
+  useEffect(() => {
+    async function loadTaxRules() {
+      try {
+        setLoading(true);
+        const docRef = doc(db, 'settings', 'tax-rules');
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.tcsRate !== undefined) setTcsRate(data.tcsRate);
+          if (data.cashThreshold !== undefined) setCashThreshold(data.cashThreshold);
+          if (data.enforcePAN !== undefined) setEnforcePAN(data.enforcePAN);
+          if (data.autoForm27EQ !== undefined) setAutoForm27EQ(data.autoForm27EQ);
+          if (data.tcsApplicable !== undefined) setTcsApplicable(data.tcsApplicable);
+
+          if (data.tdsRate !== undefined) setTdsRate(data.tdsRate);
+          if (data.annualThreshold !== undefined) setAnnualThreshold(data.annualThreshold);
+          if (data.deductTDS !== undefined) setDeductTDS(data.deductTDS);
+          if (data.supplierPANMandatory !== undefined) setSupplierPANMandatory(data.supplierPANMandatory);
+
+          if (data.maxCashPerTx !== undefined) setMaxCashPerTx(data.maxCashPerTx);
+          if (data.requireIDAbove !== undefined) setRequireIDAbove(data.requireIDAbove);
+          if (data.alertOnBreach !== undefined) setAlertOnBreach(data.alertOnBreach);
+        }
+      } catch (err: any) {
+        console.error('Error fetching tax rules:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadTaxRules();
+  }, []);
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      setSaveStatus('idle');
+      const docRef = doc(db, 'settings', 'tax-rules');
+      await setDoc(docRef, {
+        tcsRate,
+        cashThreshold,
+        enforcePAN,
+        autoForm27EQ,
+        tcsApplicable,
+        tdsRate,
+        annualThreshold,
+        deductTDS,
+        supplierPANMandatory,
+        maxCashPerTx,
+        requireIDAbove,
+        alertOnBreach,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      setSaveStatus('success');
+      setStatusMessage('Tax compliance & threshold rules saved successfully!');
+      setTimeout(() => setSaveStatus('idle'), 4000);
+    } catch (err: any) {
+      console.error('Error saving tax rules:', err);
+      setSaveStatus('error');
+      setStatusMessage(err.message || 'Failed to save tax rules');
+      setTimeout(() => setSaveStatus('idle'), 5000);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const inputClass =
-    'w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 placeholder:text-neutral-400 transition-colors';
+    'w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 placeholder:text-neutral-400 transition-colors font-medium';
   const labelClass = 'text-xs font-medium text-neutral-700 mb-1';
   const sectionClass =
     'p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs';
@@ -32,9 +106,10 @@ export function SettingsTaxRulesView() {
     <div className="flex items-center justify-between py-2 border-b border-[#e2e8f0] last:border-0">
       <div>
         <div className="text-xs font-medium text-neutral-700">{label}</div>
-        {sub && <div className="text-[11px] text-neutral-500">{sub}</div>}
+        {sub && <div className="text-[11px] text-neutral-500 font-normal">{sub}</div>}
       </div>
       <button
+        type="button"
         onClick={onChange}
         className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${value ? 'bg-emerald-500' : 'bg-neutral-200'}`}
       >
@@ -54,127 +129,201 @@ export function SettingsTaxRulesView() {
       <TabBar title="settings_tax_rules" />
       <ActionToolbar
         filterPlaceholder="Filter tax rules..."
-        insertLabel="Save Changes"
-        onInsertClick={() => {}}
+        insertLabel={saving ? 'Saving...' : 'Save Rules'}
+        onInsertClick={handleSave}
       />
       <div className="flex-1 overflow-y-auto bg-[#fafafa] flex flex-col custom-scrollbar w-full">
         <div className="p-4 flex flex-col gap-4 max-w-5xl w-full mx-auto">
 
-          {/* TCS Rules */}
-          <div className={sectionClass}>
-            <div className={sectionHeader}>
-              <Scale className="w-3.5 h-3.5 text-emerald-600" />
-              TCS Rules — Tax Collected at Source
+          {/* Status Toast / Alert */}
+          {saveStatus === 'success' && (
+            <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{statusMessage}</span>
             </div>
-
-            {/* Info card */}
-            <div className="flex items-start gap-2 p-2.5 rounded-md bg-blue-50 border border-blue-100 mb-3">
-              <Info className="w-3.5 h-3.5 text-blue-400 mt-0.5 shrink-0" />
-              <div className="text-[11px] text-blue-700">
-                Under Section 206C(1H), sellers must collect TCS at 1% on cash sales of goods exceeding ₹50 lakh in a financial year. Applies to turnover &gt; ₹10 Cr.
-              </div>
+          )}
+          {saveStatus === 'error' && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <span>{statusMessage}</span>
             </div>
+          )}
 
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <div className={labelClass}>TCS Rate (%)</div>
-                <input className={inputClass} value={tcsRate} onChange={e => setTcsRate(e.target.value)} type="number" step="0.1" />
-              </div>
-              <div>
-                <div className={labelClass}>Cash Transaction Threshold (₹)</div>
-                <input className={inputClass} value={cashThreshold} onChange={e => setCashThreshold(e.target.value)} type="number" />
-              </div>
+          {loading ? (
+            <div className="p-12 flex flex-col items-center justify-center gap-2 text-neutral-500">
+              <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+              <span className="text-xs font-medium">Loading tax rules...</span>
             </div>
+          ) : (
+            <>
+              {/* TCS Rules */}
+              <div className={sectionClass}>
+                <div className={sectionHeader}>
+                  <Scale className="w-3.5 h-3.5 text-emerald-600" />
+                  TCS Rules — Tax Collected at Source (Section 206C)
+                </div>
 
-            <Toggle value={enforcePAN} onChange={() => setEnforcePAN(!enforcePAN)} label="Enforce PAN Capture Above Threshold" sub="Mandatory PAN for cash transactions above limit" />
-            <Toggle value={autoForm27EQ} onChange={() => setAutoForm27EQ(!autoForm27EQ)} label="Auto-generate Form 27EQ Quarterly" sub="Prepare TCS return form automatically" />
+                <div className="flex items-start gap-2 p-2.5 rounded-md bg-blue-50 border border-blue-100 mb-3">
+                  <Info className="w-3.5 h-3.5 text-blue-500 mt-0.5 shrink-0" />
+                  <div className="text-[11px] text-blue-700 font-medium">
+                    Configure Tax Collected at Source thresholds for bullion, jewellery, and cash receipts according to Income Tax regulations.
+                  </div>
+                </div>
 
-            <div className="mt-3">
-              <div className={labelClass}>TCS Applicable On</div>
-              <div className="flex gap-2 flex-wrap">
-                {['Gold', 'Silver', 'Diamond', 'All'].map(item => (
-                  <button
-                    key={item}
-                    onClick={() => toggleTCS(item)}
-                    className={`px-3 py-1 rounded-full text-[10px] font-medium border transition-colors ${tcsApplicable.includes(item) ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'bg-white text-neutral-600 border-[#e2e8f0] hover:border-emerald-200'}`}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <div className={labelClass}>TCS Rate (%)</div>
+                    <input
+                      className={inputClass}
+                      value={tcsRate}
+                      onChange={e => setTcsRate(e.target.value)}
+                      placeholder="e.g. 1.0"
+                      type="number"
+                      step="0.1"
+                    />
+                  </div>
+                  <div>
+                    <div className={labelClass}>Cash Transaction Threshold (₹)</div>
+                    <input
+                      className={inputClass}
+                      value={cashThreshold}
+                      onChange={e => setCashThreshold(e.target.value)}
+                      placeholder="e.g. 200000"
+                      type="number"
+                    />
+                  </div>
+                </div>
 
-          {/* TDS Rules */}
-          <div className={sectionClass}>
-            <div className={sectionHeader}>
-              <Shield className="w-3.5 h-3.5 text-emerald-600" />
-              TDS Rules — Section 194Q
-            </div>
-
-            <div className="flex items-start gap-2 p-2.5 rounded-md bg-blue-50 border border-blue-100 mb-3">
-              <Info className="w-3.5 h-3.5 text-blue-400 mt-0.5 shrink-0" />
-              <div className="text-[11px] text-blue-700">
-                Section 194Q requires buyers to deduct TDS at 0.1% on purchases exceeding ₹50 lakh from a supplier in a financial year. Buyer&apos;s turnover must exceed ₹10 Cr.
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <div className={labelClass}>TDS Rate (%)</div>
-                <input className={inputClass} value={tdsRate} onChange={e => setTdsRate(e.target.value)} type="number" step="0.01" />
-              </div>
-              <div>
-                <div className={labelClass}>Annual Purchase Threshold (₹)</div>
-                <input className={inputClass} value={annualThreshold} onChange={e => setAnnualThreshold(e.target.value)} type="number" />
-              </div>
-            </div>
-
-            <Toggle value={deductTDS} onChange={() => setDeductTDS(!deductTDS)} label="Deduct TDS on Purchases Above Threshold" sub="Automatically flag purchases for TDS deduction" />
-            <Toggle value={supplierPANMandatory} onChange={() => setSupplierPANMandatory(!supplierPANMandatory)} label="Supplier PAN Mandatory for TDS Deduction" sub="Block TDS deduction without valid supplier PAN" />
-          </div>
-
-          {/* Cash Transaction Limits (PMLA) */}
-          <div className={sectionClass}>
-            <div className={sectionHeader}>
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-              Cash Transaction Limits — PMLA Compliance
-            </div>
-
-            <div className="flex items-start gap-2 p-2.5 rounded-md bg-amber-50 border border-amber-200 mb-3">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />
-              <div className="text-[11px] text-amber-700">
-                Under PMLA and Income Tax Act, cash transactions above ₹2,00,000 per day per person are prohibited. Violations attract 100% penalty equal to the cash received.
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <div className={labelClass}>Max Cash Acceptance Per Transaction (₹)</div>
-                <input
-                  className={`${inputClass} bg-red-50 border-red-200 text-red-800`}
-                  value={maxCashPerTx}
-                  onChange={e => setMaxCashPerTx(e.target.value)}
-                  type="number"
+                <Toggle
+                  value={enforcePAN}
+                  onChange={() => setEnforcePAN(!enforcePAN)}
+                  label="Enforce PAN Capture Above Threshold"
+                  sub="Mandatory PAN entry for cash transactions above specified limit"
                 />
-                <div className="text-[10px] text-red-500 mt-0.5">Enforced limit — ₹1,99,999 max per transaction</div>
-              </div>
-              <div>
-                <div className={labelClass}>Require ID Proof Above (₹)</div>
-                <input className={inputClass} value={requireIDAbove} onChange={e => setRequireIDAbove(e.target.value)} type="number" />
-                <div className="text-[10px] text-neutral-500 mt-0.5">Aadhaar / PAN mandatory for cash above this limit</div>
-              </div>
-            </div>
+                <Toggle
+                  value={autoForm27EQ}
+                  onChange={() => setAutoForm27EQ(!autoForm27EQ)}
+                  label="Auto-generate Form 27EQ Quarterly Summary"
+                  sub="Aggregate TCS collections for quarterly compliance filing"
+                />
 
-            <Toggle value={alertOnBreach} onChange={() => setAlertOnBreach(!alertOnBreach)} label="Alert on Threshold Breach" sub="Show warning when cash limit is about to be breached" />
-          </div>
+                <div className="mt-3">
+                  <div className={labelClass}>TCS Applicable Commodity Types</div>
+                  <div className="flex gap-2 flex-wrap">
+                    {['Gold Jewellery', 'Silver Articles', 'Loose Diamonds', 'Bullion Coins', 'Platinum'].map(item => (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => toggleTCS(item)}
+                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                          tcsApplicable.includes(item)
+                            ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
+                            : 'bg-white text-neutral-600 border-[#e2e8f0] hover:border-emerald-200'
+                        }`}
+                      >
+                        {item} {tcsApplicable.includes(item) ? '✓' : '+'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
 
-          <div className="flex justify-end">
-            <button className="flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-medium bg-neutral-900 text-white hover:bg-neutral-800 transition-colors shadow-2xs cursor-pointer">
-              <Save className="w-3.5 h-3.5" />
-              Save Tax Rules
-            </button>
-          </div>
+              {/* TDS Rules */}
+              <div className={sectionClass}>
+                <div className={sectionHeader}>
+                  <Scale className="w-3.5 h-3.5 text-emerald-600" />
+                  TDS on Purchases (Section 194Q)
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <div className={labelClass}>TDS Rate (%)</div>
+                    <input
+                      className={inputClass}
+                      value={tdsRate}
+                      onChange={e => setTdsRate(e.target.value)}
+                      placeholder="e.g. 0.1"
+                      type="number"
+                      step="0.01"
+                    />
+                  </div>
+                  <div>
+                    <div className={labelClass}>Annual Supplier Purchase Threshold (₹)</div>
+                    <input
+                      className={inputClass}
+                      value={annualThreshold}
+                      onChange={e => setAnnualThreshold(e.target.value)}
+                      placeholder="e.g. 5000000"
+                      type="number"
+                    />
+                  </div>
+                </div>
+
+                <Toggle
+                  value={deductTDS}
+                  onChange={() => setDeductTDS(!deductTDS)}
+                  label="Auto-deduct TDS on Bullion Purchase Invoices"
+                  sub="Automatically calculate TDS deduction when supplier purchases exceed threshold"
+                />
+                <Toggle
+                  value={supplierPANMandatory}
+                  onChange={() => setSupplierPANMandatory(!supplierPANMandatory)}
+                  label="Supplier PAN Mandatory for TDS"
+                  sub="Reject purchase invoice submission if supplier PAN is absent"
+                />
+              </div>
+
+              {/* Cash Transaction Limits */}
+              <div className={sectionClass}>
+                <div className={sectionHeader}>
+                  <Scale className="w-3.5 h-3.5 text-amber-500" />
+                  Cash Limits &amp; Anti-Money Laundering Safeguards
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <div className={labelClass}>Max Cash Accepted Per Transaction (₹)</div>
+                    <input
+                      className={inputClass}
+                      value={maxCashPerTx}
+                      onChange={e => setMaxCashPerTx(e.target.value)}
+                      placeholder="e.g. 199999"
+                      type="number"
+                    />
+                  </div>
+                  <div>
+                    <div className={labelClass}>Require Customer ID / Aadhaar Above (₹)</div>
+                    <input
+                      className={inputClass}
+                      value={requireIDAbove}
+                      onChange={e => setRequireIDAbove(e.target.value)}
+                      placeholder="e.g. 50000"
+                      type="number"
+                    />
+                  </div>
+                </div>
+
+                <Toggle
+                  value={alertOnBreach}
+                  onChange={() => setAlertOnBreach(!alertOnBreach)}
+                  label="Display Prominent Warning on Threshold Breach"
+                  sub="Warn cashier immediately if payment exceeds statutory cash acceptance limit"
+                />
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-medium bg-[#24b47e] text-white hover:bg-[#1fa070] disabled:opacity-50 transition-colors shadow-2xs cursor-pointer"
+                >
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  <span>{saving ? 'Saving...' : 'Save Tax Rules'}</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

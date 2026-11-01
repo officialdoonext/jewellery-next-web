@@ -1,258 +1,438 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
 import {
-  Award, CheckCircle2, Copy, Download, ExternalLink,
-  Monitor, RefreshCw, Mail, CreditCard, Zap
+  Award, CheckCircle2, Copy,
+  Monitor, Plus, Trash2, Save, Loader2, AlertCircle
 } from 'lucide-react';
+import { db } from '@/lib/firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
-const MODULES = [
-  { name: 'Sales & POS', icon: '🛒', active: true },
-  { name: 'Inventory', icon: '📦', active: true },
-  { name: 'Rates & Valuation', icon: '💰', active: true },
-  { name: 'Purchases', icon: '🧾', active: true },
-  { name: 'Manufacturing', icon: '⚙️', active: true },
-  { name: 'Customers', icon: '👥', active: true },
-  { name: 'Finance', icon: '📊', active: true },
-  { name: 'Reports', icon: '📈', active: true },
-  { name: 'Employees', icon: '👤', active: true },
-  { name: 'Branches', icon: '🏪', active: true },
-  { name: 'Settings', icon: '⚙️', active: true },
-  { name: 'API Access', icon: '🔌', active: true },
-];
-
-const ACTIVE_TERMINALS = [
-  { id: 'HYD-COUNTER-01', name: 'Main Counter', lastSeen: '15:45 today', os: 'Windows 11' },
-  { id: 'HYD-COUNTER-02', name: 'Counter 2', lastSeen: '15:44 today', os: 'Windows 11' },
-  { id: 'HYD-ADMIN', name: 'Admin PC', lastSeen: '15:44 today', os: 'Windows 10' },
-  { id: 'HYD-VAULT', name: 'Vault Terminal', lastSeen: '12:30 today', os: 'Windows 11' },
-  { id: 'HYD-MGR', name: 'Manager Tablet', lastSeen: 'Yesterday', os: 'iPad OS 17' },
-  { id: 'HYD-DISPLAY', name: 'Display Counter', lastSeen: '15:40 today', os: 'Windows 11' },
-  { id: 'HYD-REPAIR', name: 'Repair Section', lastSeen: '11:20 today', os: 'Windows 10' },
-  { id: 'HYD-BILLING', name: 'Billing Counter', lastSeen: '15:43 today', os: 'Windows 11' },
-];
+interface TerminalLicense {
+  id: string;
+  name: string;
+  lastSeen: string;
+  os: string;
+}
 
 export function SettingsSubscriptionView() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [statusMessage, setStatusMessage] = useState('');
+
+  // Dynamic state — clean empty state without predefault values
+  const [licenseKey, setLicenseKey] = useState('');
+  const [planName, setPlanName] = useState('');
+  const [organizationName, setOrganizationName] = useState('');
+  const [validTill, setValidTill] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [maxTerminals, setMaxTerminals] = useState('');
+  const [activeTerminals, setActiveTerminals] = useState<TerminalLicense[]>([]);
+
+  // Add terminal state
+  const [showAddTerminal, setShowAddTerminal] = useState(false);
+  const [termId, setTermId] = useState('');
+  const [termName, setTermName] = useState('');
+  const [termOS, setTermOS] = useState('Windows 11');
+
   const [keyVisible, setKeyVisible] = useState(false);
   const [copied, setCopied] = useState(false);
-  const LICENSE_KEY = 'JWLX-2026-ENTERPRISE-PRO';
+
+  useEffect(() => {
+    async function loadSubscription() {
+      try {
+        setLoading(true);
+        const docRef = doc(db, 'settings', 'subscription');
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.licenseKey !== undefined) setLicenseKey(data.licenseKey);
+          if (data.planName !== undefined) setPlanName(data.planName);
+          if (data.organizationName !== undefined) setOrganizationName(data.organizationName);
+          if (data.validTill !== undefined) setValidTill(data.validTill);
+          if (data.contactEmail !== undefined) setContactEmail(data.contactEmail);
+          if (data.maxTerminals !== undefined) setMaxTerminals(data.maxTerminals);
+          if (data.activeTerminals !== undefined) setActiveTerminals(data.activeTerminals);
+        }
+      } catch (err: any) {
+        console.error('Error fetching subscription settings:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadSubscription();
+  }, []);
+
+  const handleSave = async (updatedTerminals?: TerminalLicense[]) => {
+    try {
+      setSaving(true);
+      setSaveStatus('idle');
+      const docRef = doc(db, 'settings', 'subscription');
+      await setDoc(docRef, {
+        licenseKey,
+        planName,
+        organizationName,
+        validTill,
+        contactEmail,
+        maxTerminals,
+        activeTerminals: updatedTerminals || activeTerminals,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      setSaveStatus('success');
+      setStatusMessage('Subscription & license details saved successfully!');
+      setTimeout(() => setSaveStatus('idle'), 4000);
+    } catch (err: any) {
+      console.error('Error saving subscription:', err);
+      setSaveStatus('error');
+      setStatusMessage(err.message || 'Failed to save subscription details');
+      setTimeout(() => setSaveStatus('idle'), 5000);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const copyKey = () => {
-    navigator.clipboard.writeText(LICENSE_KEY).catch(() => {});
+    if (!licenseKey) return;
+    navigator.clipboard.writeText(licenseKey).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const addTerminal = () => {
+    if (!termId.trim()) return;
+    const newTerminal: TerminalLicense = {
+      id: termId.trim().toUpperCase(),
+      name: termName.trim() || 'Workstation',
+      lastSeen: 'Active today',
+      os: termOS
+    };
+    const nextList = [...activeTerminals, newTerminal];
+    setActiveTerminals(nextList);
+    setTermId('');
+    setTermName('');
+    setShowAddTerminal(false);
+  };
+
+  const removeTerminal = (id: string) => {
+    setActiveTerminals(ts => ts.filter(t => t.id !== id));
+  };
+
+  const inputClass =
+    'w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 placeholder:text-neutral-400 transition-colors font-medium';
+  const labelClass = 'text-xs font-medium text-neutral-700 mb-1';
   const sectionClass =
     'p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs';
   const sectionHeader =
     'text-xs font-medium text-neutral-700 uppercase tracking-wider mb-2.5 flex items-center gap-1.5';
 
-  const daysTotal = 730;
-  const daysRemaining = 425;
-  const progressPct = Math.round(((daysTotal - daysRemaining) / daysTotal) * 100);
-
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0">
       <TabBar title="settings_subscription" />
       <ActionToolbar
-        filterPlaceholder="Filter license..."
-        insertLabel="Check for Updates"
-        onInsertClick={() => {}}
+        filterPlaceholder="Filter license details..."
+        insertLabel={saving ? 'Saving...' : 'Save License Details'}
+        onInsertClick={() => handleSave()}
       />
       <div className="flex-1 overflow-y-auto bg-[#fafafa] flex flex-col custom-scrollbar w-full">
         <div className="p-4 flex flex-col gap-4 max-w-5xl w-full mx-auto">
 
-          {/* License Hero */}
-          <div className="p-4 rounded-lg bg-gradient-to-br from-emerald-900 to-emerald-700 border border-emerald-600 shadow-2xs text-white">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-emerald-500/30 flex items-center justify-center">
-                  <Award className="w-4 h-4 text-emerald-200" />
-                </div>
-                <div>
-                  <div className="text-[10px] text-emerald-300 uppercase tracking-wider">Jewellery Suite</div>
-                  <div className="text-sm font-medium text-white">Enterprise License</div>
-                </div>
-              </div>
-              <span className="px-2.5 py-1 rounded-md text-[10px] font-medium bg-emerald-500 text-white border border-emerald-400">
-                ENTERPRISE UNLIMITED
-              </span>
+          {/* Status Toast / Alert */}
+          {saveStatus === 'success' && (
+            <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{statusMessage}</span>
             </div>
+          )}
+          {saveStatus === 'error' && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <span>{statusMessage}</span>
+            </div>
+          )}
 
-            <div className="mb-3">
-              <div className="text-[10px] text-emerald-300 mb-1">License Key</div>
-              <div className="flex items-center gap-2 bg-emerald-800/50 rounded-md px-3 py-2">
-                <span className="font-mono text-sm text-white">
-                  {keyVisible ? LICENSE_KEY : 'JWLX-••••-••••••••••-•••'}
-                </span>
-                <button
-                  onClick={() => setKeyVisible(!keyVisible)}
-                  className="ml-auto text-emerald-300 hover:text-white transition-colors text-[10px]"
-                >
-                  {keyVisible ? 'Hide' : 'Show'}
-                </button>
-                <button
-                  onClick={copyKey}
-                  className="p-1 rounded hover:bg-emerald-700 transition-colors text-emerald-300 hover:text-white"
-                >
-                  {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
-              </div>
+          {loading ? (
+            <div className="p-12 flex flex-col items-center justify-center gap-2 text-neutral-500">
+              <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+              <span className="text-xs font-medium">Loading subscription details...</span>
             </div>
-
-            <div className="grid grid-cols-3 gap-3 mb-4">
-              <div>
-                <div className="text-[10px] text-emerald-300">Valid Until</div>
-                <div className="text-xs font-medium text-white mt-0.5">December 31, 2028</div>
-                <div className="text-[10px] text-emerald-400">~2 years remaining</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-emerald-300">Terminals</div>
-                <div className="text-xs font-medium text-white mt-0.5">8 / 25 Active</div>
-                <div className="text-[10px] text-emerald-400">17 slots available</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-emerald-300">Support</div>
-                <div className="text-xs font-medium text-white mt-0.5">24/7 Dedicated SLA</div>
-                <div className="text-[10px] text-emerald-400">Priority response</div>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-[10px] text-emerald-300 mb-1">
-                <span>License Period</span>
-                <span>{progressPct}% elapsed</span>
-              </div>
-              <div className="w-full h-1.5 bg-emerald-800 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-400 rounded-full" style={{ width: `${progressPct}%` }} />
-              </div>
-            </div>
-          </div>
-
-          {/* Active Modules Grid */}
-          <div className={sectionClass}>
-            <div className={sectionHeader}>
-              <Zap className="w-3.5 h-3.5 text-emerald-600" />
-              Active Modules ({MODULES.length}/{MODULES.length})
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {MODULES.map(mod => (
-                <div key={mod.name} className={`flex items-center gap-2 p-2.5 rounded-lg border transition-colors ${mod.active ? 'bg-emerald-50 border-emerald-200' : 'bg-neutral-50 border-[#e2e8f0]'}`}>
-                  <span className="text-base">{mod.icon}</span>
-                  <div className="min-w-0">
-                    <div className="text-[10px] font-medium text-neutral-800 truncate">{mod.name}</div>
-                    {mod.active && (
-                      <div className="flex items-center gap-0.5 mt-0.5">
-                        <CheckCircle2 className="w-2.5 h-2.5 text-emerald-500" />
-                        <span className="text-[9px] text-emerald-600">Active</span>
+          ) : (
+            <>
+              {/* License Hero Card */}
+              <div className="p-4 rounded-lg bg-gradient-to-br from-emerald-900 to-emerald-700 border border-emerald-600 shadow-2xs text-white">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/30 flex items-center justify-center">
+                      <Award className="w-4 h-4 text-emerald-200" />
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-emerald-300 uppercase tracking-wider">Jewellery Next Cloud Suite</div>
+                      <div className="text-sm font-medium text-white">
+                        {planName || 'Jewellery Suite License'}
                       </div>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-md text-[10px] font-medium bg-emerald-500 text-white border border-emerald-400">
+                    {licenseKey ? 'LICENSED' : 'ENTER DETAILS BELOW'}
+                  </span>
+                </div>
+
+                <div className="mb-3">
+                  <div className="text-[10px] text-emerald-300 mb-1">Registered Key</div>
+                  <div className="flex items-center gap-2 bg-emerald-800/50 rounded-md px-3 py-2">
+                    <span className="font-mono text-sm text-white">
+                      {licenseKey
+                        ? (keyVisible ? licenseKey : `${licenseKey.slice(0, 4)}-••••-••••-••••`)
+                        : 'No license key entered yet'}
+                    </span>
+                    {licenseKey && (
+                      <button
+                        type="button"
+                        onClick={() => setKeyVisible(!keyVisible)}
+                        className="text-[10px] text-emerald-300 hover:text-white transition-colors"
+                      >
+                        {keyVisible ? 'Hide' : 'Show'}
+                      </button>
                     )}
+                    {licenseKey && (
+                      <button
+                        type="button"
+                        onClick={copyKey}
+                        className="ml-auto text-emerald-300 hover:text-white transition-colors"
+                        title="Copy Key"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {copied && <span className="text-[10px] text-emerald-200">Copied!</span>}
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Terminal Usage */}
-          <div className={sectionClass}>
-            <div className={sectionHeader}>
-              <Monitor className="w-3.5 h-3.5 text-emerald-600" />
-              Terminal Usage (8 Active / 25 Allowed)
-            </div>
-            <div className="w-full h-1.5 bg-neutral-100 rounded-full overflow-hidden mb-3">
-              <div className="h-full bg-emerald-500 rounded-full" style={{ width: '32%' }} />
-            </div>
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-[#e2e8f0]">
-                  {['Terminal ID','Name','OS','Last Seen'].map(h => (
-                    <th key={h} className="text-left py-2 px-2 text-[10px] font-medium text-neutral-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {ACTIVE_TERMINALS.map(t => (
-                  <tr key={t.id} className="border-b border-[#e2e8f0] hover:bg-white/60 transition-colors">
-                    <td className="py-2 px-2 font-mono text-[10px] text-neutral-600">{t.id}</td>
-                    <td className="py-2 px-2 text-neutral-800 text-xs">{t.name}</td>
-                    <td className="py-2 px-2 text-neutral-600 text-[10px]">{t.os}</td>
-                    <td className="py-2 px-2 text-neutral-500 text-[10px]">{t.lastSeen}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Support & Updates */}
-          <div className={sectionClass}>
-            <div className={sectionHeader}>
-              <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
-              Support &amp; Updates
-            </div>
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div className="p-2.5 rounded-md bg-white border border-[#e2e8f0]">
-                <div className="text-[10px] text-neutral-500">Current Version</div>
-                <div className="text-xs font-medium text-neutral-800 mt-0.5">Jewellery Suite v1.2.0-enterprise</div>
-              </div>
-              <div className="p-2.5 rounded-md bg-white border border-[#e2e8f0]">
-                <div className="text-[10px] text-neutral-500">Last Updated</div>
-                <div className="text-xs font-medium text-neutral-800 mt-0.5">Oct 28, 2026</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer">
-                <RefreshCw className="w-3.5 h-3.5" />
-                Check for Updates
-              </button>
-              <a
-                href="mailto:support@jewellerynext.in"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-[#e2e8f0] hover:bg-neutral-50 transition-colors shadow-2xs"
-              >
-                <Mail className="w-3.5 h-3.5" />
-                Submit Support Ticket
-                <ExternalLink className="w-3 h-3 text-neutral-400" />
-              </a>
-              <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-[#e2e8f0] hover:bg-neutral-50 transition-colors shadow-2xs cursor-pointer">
-                <Download className="w-3.5 h-3.5" />
-                Download Release Notes
-              </button>
-            </div>
-          </div>
-
-          {/* Billing */}
-          <div className={sectionClass}>
-            <div className={sectionHeader}>
-              <CreditCard className="w-3.5 h-3.5 text-emerald-600" />
-              Billing
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <div className="text-[10px] text-neutral-500 mb-1">Next Renewal Date</div>
-                <div className="text-xs font-medium text-neutral-800">December 31, 2028</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-neutral-500 mb-1">Billing Contact</div>
-                <div className="text-xs font-medium text-neutral-800">billing@srijewellers.com</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-neutral-500 mb-1">Payment Method</div>
-                <div className="flex items-center gap-1.5">
-                  <CreditCard className="w-3.5 h-3.5 text-neutral-500" />
-                  <span className="text-xs font-medium text-neutral-800">Razorpay on file</span>
-                  <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-100 text-emerald-700">Active</span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11px] pt-2 border-t border-emerald-700/50">
+                  <div>
+                    <span className="text-emerald-300">Organization:</span>{' '}
+                    <span className="font-medium text-white">{organizationName || '---'}</span>
+                  </div>
+                  <div>
+                    <span className="text-emerald-300">Valid Till:</span>{' '}
+                    <span className="font-medium text-white">{validTill || '---'}</span>
+                  </div>
+                  <div>
+                    <span className="text-emerald-300">Terminals:</span>{' '}
+                    <span className="font-medium text-white">
+                      {activeTerminals.length} / {maxTerminals || 'Unlimited'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-emerald-300">Support Email:</span>{' '}
+                    <span className="font-medium text-white">{contactEmail || '---'}</span>
+                  </div>
                 </div>
               </div>
-              <div>
-                <div className="text-[10px] text-neutral-500 mb-1">Invoice History</div>
-                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-[#e2e8f0] hover:bg-neutral-50 transition-colors shadow-2xs cursor-pointer">
-                  <Download className="w-3.5 h-3.5" />
-                  View Past Invoices
+
+              {/* License Details Form */}
+              <div className={sectionClass}>
+                <div className={sectionHeader}>
+                  <Award className="w-3.5 h-3.5 text-emerald-600" />
+                  Subscription &amp; Organization Details
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <div className={labelClass}>Organization / Jeweller Name *</div>
+                    <input
+                      className={inputClass}
+                      value={organizationName}
+                      onChange={e => setOrganizationName(e.target.value)}
+                      placeholder="Enter legal showroom / firm name"
+                    />
+                  </div>
+                  <div>
+                    <div className={labelClass}>License Key *</div>
+                    <input
+                      className={`${inputClass} font-mono`}
+                      value={licenseKey}
+                      onChange={e => setLicenseKey(e.target.value)}
+                      placeholder="e.g. JWLX-2026-ENTERPRISE-PRO"
+                    />
+                  </div>
+                  <div>
+                    <div className={labelClass}>Plan Name</div>
+                    <input
+                      className={inputClass}
+                      value={planName}
+                      onChange={e => setPlanName(e.target.value)}
+                      placeholder="e.g. Enterprise Cloud, Multi-Branch Pro"
+                    />
+                  </div>
+                  <div>
+                    <div className={labelClass}>Validity Expiry Date</div>
+                    <input
+                      className={inputClass}
+                      value={validTill}
+                      onChange={e => setValidTill(e.target.value)}
+                      type="date"
+                    />
+                  </div>
+                  <div>
+                    <div className={labelClass}>Max Authorized Terminals</div>
+                    <input
+                      className={inputClass}
+                      value={maxTerminals}
+                      onChange={e => setMaxTerminals(e.target.value)}
+                      placeholder="e.g. 10 or Unlimited"
+                    />
+                  </div>
+                  <div>
+                    <div className={labelClass}>Registered Support Email</div>
+                    <input
+                      className={inputClass}
+                      value={contactEmail}
+                      onChange={e => setContactEmail(e.target.value)}
+                      placeholder="e.g. billing@jewellers.com"
+                      type="email"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Active Terminals Table */}
+              <div className={sectionClass}>
+                <div className="flex items-center justify-between mb-2.5">
+                  <div className={sectionHeader} style={{ marginBottom: 0 }}>
+                    <Monitor className="w-3.5 h-3.5 text-emerald-600" />
+                    Authorized Billing Terminals ({activeTerminals.length})
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddTerminal(!showAddTerminal)}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Authorize Terminal
+                  </button>
+                </div>
+
+                {/* Inline Add Terminal Form */}
+                {showAddTerminal && (
+                  <div className="mb-3 p-3 bg-white border border-emerald-200 rounded-lg shadow-2xs">
+                    <div className="text-xs font-medium text-neutral-800 mb-2">Authorize New Counter Terminal</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
+                      <div>
+                        <label className={labelClass}>Terminal ID *</label>
+                        <input
+                          className={inputClass}
+                          placeholder="e.g. POS-MAIN-01"
+                          value={termId}
+                          onChange={e => setTermId(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Counter Name</label>
+                        <input
+                          className={inputClass}
+                          placeholder="e.g. Gold Section Counter"
+                          value={termName}
+                          onChange={e => setTermName(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Operating System</label>
+                        <select
+                          className={inputClass}
+                          value={termOS}
+                          onChange={e => setTermOS(e.target.value)}
+                        >
+                          <option value="Windows 11">Windows 11</option>
+                          <option value="Windows 10">Windows 10</option>
+                          <option value="macOS">macOS</option>
+                          <option value="iPadOS">iPadOS</option>
+                          <option value="Android">Android POS</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddTerminal(false)}
+                        className="px-2.5 py-1 text-xs border border-neutral-200 rounded hover:bg-neutral-50 text-neutral-600 font-medium"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={addTerminal}
+                        className="px-3 py-1 text-xs bg-[#24b47e] hover:bg-[#1fa070] text-white rounded font-medium shadow-2xs"
+                      >
+                        Authorize
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {activeTerminals.length === 0 ? (
+                  <div className="p-8 text-center bg-white rounded-md border border-dashed border-[#e2e8f0]">
+                    <div className="text-xs text-neutral-500 font-medium">No terminals registered yet</div>
+                    <div className="text-[11px] text-neutral-400 mt-1">
+                      Click &apos;Authorize Terminal&apos; to register counter workstations for this showroom license.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-[#e2e8f0]">
+                          {['Terminal ID', 'Counter Name', 'OS Platform', 'Status', 'Actions'].map(h => (
+                            <th key={h} className="text-left py-2 px-2 text-[10px] font-medium text-neutral-500 uppercase tracking-wider whitespace-nowrap">
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activeTerminals.map(t => (
+                          <tr key={t.id} className="border-b border-[#e2e8f0] hover:bg-white/60 transition-colors">
+                            <td className="py-2.5 px-2 font-mono font-medium text-neutral-800">{t.id}</td>
+                            <td className="py-2.5 px-2 text-neutral-700 font-medium">{t.name}</td>
+                            <td className="py-2.5 px-2 text-neutral-600">{t.os}</td>
+                            <td className="py-2.5 px-2">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700">
+                                <CheckCircle2 className="w-2.5 h-2.5" />
+                                AUTHORIZED
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-2">
+                              <button
+                                type="button"
+                                onClick={() => removeTerminal(t.id)}
+                                className="p-1 rounded hover:bg-red-50 text-neutral-400 hover:text-red-500 transition-colors"
+                                title="Revoke terminal"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleSave()}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-medium bg-[#24b47e] text-white hover:bg-[#1fa070] disabled:opacity-50 transition-colors shadow-2xs cursor-pointer"
+                >
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  <span>{saving ? 'Saving...' : 'Save License Details'}</span>
                 </button>
               </div>
-            </div>
-          </div>
+            </>
+          )}
         </div>
       </div>
     </div>
