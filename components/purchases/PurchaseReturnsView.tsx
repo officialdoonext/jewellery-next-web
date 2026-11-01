@@ -1,31 +1,34 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TabBar } from '../TabBar';
 import { ActionToolbar } from '../ActionToolbar';
 import {
   RotateCcw,
-  FileText,
   Scale,
   CreditCard,
   AlertTriangle,
   Plus,
   X,
-  Check,
-  Building2,
-  Calendar,
-  Layers,
-  ArrowUpDown,
-  Search,
-  Eye,
-  ShieldAlert,
-  ShieldCheck,
   CheckCircle2,
   Coins,
-  Package,
+  Search,
+  Building2,
+  Trash2,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
+import { db } from '@/lib/firebase';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  deleteDoc,
+  doc,
+  updateDoc,
+} from 'firebase/firestore';
 
-interface PurchaseDebitNote {
+export interface PurchaseDebitNote {
   id: string;
   debit_note_no: string;
   orig_purchase_inv_no: string;
@@ -46,431 +49,348 @@ interface PurchaseDebitNote {
   created_at: string;
 }
 
-const INITIAL_DEBIT_NOTES: PurchaseDebitNote[] = [
-  {
-    id: '99001122-3344-5566-7788-223344556677',
-    debit_note_no: 'DN-2026-009',
-    orig_purchase_inv_no: 'PUR-26-042',
-    supplier_name: 'Apex Jewellery Works',
-    item_tag_code: 'TAG-G-8910',
-    weight_returned_g: 14.200,
-    return_reason: 'Porosity / Casting Defect',
-    return_rate_per_g: 7850.00,
-    rate_type: 'ORIGINAL_RATE',
-    tax_reversal_amount: 3344.10,
-    debit_amount: 114814.10,
-    status: 'ACCEPTED_BY_VENDOR',
-    created_at: '2026-10-29',
-  },
-  {
-    id: '99001122-3344-5566-7788-223344556678',
-    debit_note_no: 'DN-2026-010',
-    orig_purchase_inv_no: 'PUR-26-043',
-    supplier_name: 'Mangalore Casting Works',
-    item_tag_code: 'TAG-G-6201',
-    weight_returned_g: 36.450,
-    return_reason: 'Hallmark Purity Failure',
-    return_rate_per_g: 7850.00,
-    rate_type: 'ORIGINAL_RATE',
-    tax_reversal_amount: 8583.98,
-    debit_amount: 294716.48,
-    status: 'PENDING_CONFIRMATION',
-    created_at: '2026-10-30',
-  },
-  {
-    id: '99001122-3344-5566-7788-223344556679',
-    debit_note_no: 'DN-2026-011',
-    orig_purchase_inv_no: 'PUR-26-038',
-    supplier_name: 'Surat Diamond & Bullion Co.',
-    item_tag_code: 'TAG-D-4512',
-    weight_returned_g: 5.420,
-    return_reason: 'Stone Detachment',
-    return_rate_per_g: 7920.00,
-    rate_type: 'MARKET_RATE',
-    tax_reversal_amount: 1287.79,
-    debit_amount: 44214.19,
-    status: 'CREDITED_TO_ACCOUNT',
-    created_at: '2026-10-25',
-  },
-  {
-    id: '99001122-3344-5566-7788-223344556680',
-    debit_note_no: 'DN-2026-012',
-    orig_purchase_inv_no: 'PUR-26-035',
-    supplier_name: 'Apex Jewellery Works',
-    item_tag_code: 'TAG-G-3190',
-    weight_returned_g: 22.180,
-    return_reason: 'Weight Shortfall',
-    return_rate_per_g: 7800.00,
-    rate_type: 'ORIGINAL_RATE',
-    tax_reversal_amount: 5190.12,
-    debit_amount: 178194.12,
-    status: 'ACCEPTED_BY_VENDOR',
-    created_at: '2026-10-27',
-  },
-  {
-    id: '99001122-3344-5566-7788-223344556681',
-    debit_note_no: 'DN-2026-013',
-    orig_purchase_inv_no: 'PUR-26-041',
-    supplier_name: 'Shree Bullion Refinery',
-    item_tag_code: 'BAR-999-041',
-    weight_returned_g: 25.000,
-    return_reason: 'Weight Shortfall',
-    return_rate_per_g: 8090.00,
-    rate_type: 'ORIGINAL_RATE',
-    tax_reversal_amount: 6067.50,
-    debit_amount: 208317.50,
-    status: 'ACCEPTED_BY_VENDOR',
-    created_at: '2026-10-28',
-  },
-  {
-    id: '99001122-3344-5566-7788-223344556682',
-    debit_note_no: 'DN-2026-014',
-    orig_purchase_inv_no: 'PUR-26-040',
-    supplier_name: 'Mangalore Casting Works',
-    item_tag_code: 'TAG-G-7104',
-    weight_returned_g: 15.170,
-    return_reason: 'Solder Excess',
-    return_rate_per_g: 7850.00,
-    rate_type: 'ORIGINAL_RATE',
-    tax_reversal_amount: 3572.54,
-    debit_amount: 122657.04,
-    status: 'PENDING_CONFIRMATION',
-    created_at: '2026-10-31',
-  },
-];
-
-const REASON_OPTIONS = [
-  'Hallmark Purity Failure',
-  'Porosity / Casting Defect',
-  'Weight Shortfall',
-  'Solder Excess',
-  'Stone Detachment',
-] as const;
-
 export function PurchasesReturnsView() {
-  const [debitNotes, setDebitNotes] = useState<PurchaseDebitNote[]>(INITIAL_DEBIT_NOTES);
-  const [activeTab, setActiveTab] = useState<'data' | 'definition'>('data');
+  const [debitNotes, setDebitNotes] = useState<PurchaseDebitNote[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'All' | 'ACCEPTED_BY_VENDOR' | 'PENDING_CONFIRMATION' | 'CREDITED_TO_ACCOUNT'>('All');
-  const [reasonFilter, setReasonFilter] = useState<string>('All');
-  const [isNewReturnOpen, setIsNewReturnOpen] = useState(false);
-  const [selectedNoteForDetail, setSelectedNoteForDetail] = useState<PurchaseDebitNote | null>(null);
+  const [filterStatus, setFilterStatus] = useState('All');
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'idle'>('idle');
 
   // Form State
-  const [formOrigBill, setFormOrigBill] = useState('PUR-26-042');
-  const [formSupplier, setFormSupplier] = useState('Apex Jewellery Works');
-  const [formItemTag, setFormItemTag] = useState('TAG-G-9021');
-  const [formReason, setFormReason] = useState<typeof REASON_OPTIONS[number]>('Hallmark Purity Failure');
-  const [formWeight, setFormWeight] = useState('18.500');
-  const [formRate, setFormRate] = useState('7850.00');
-  const [formRateType, setFormRateType] = useState<'ORIGINAL_RATE' | 'MARKET_RATE'>('ORIGINAL_RATE');
+  const [noteNo, setNoteNo] = useState('');
+  const [origInv, setOrigInv] = useState('');
+  const [supplierName, setSupplierName] = useState('');
+  const [tagCode, setTagCode] = useState('');
+  const [weightReturned, setWeightReturned] = useState('');
+  const [returnReason, setReturnReason] = useState<PurchaseDebitNote['return_reason']>('Porosity / Casting Defect');
+  const [ratePerGram, setRatePerGram] = useState('7850.00');
+  const [rateType, setRateType] = useState<PurchaseDebitNote['rate_type']>('ORIGINAL_RATE');
 
-  // Calculations
-  const calculatedReturn = useMemo(() => {
-    const wt = parseFloat(formWeight) || 0;
-    const rate = parseFloat(formRate) || 0;
-    const baseValue = wt * rate;
-    const gstReversal = baseValue * 0.03;
-    const totalDebit = baseValue + gstReversal;
-    return { wt, rate, baseValue, gstReversal, totalDebit };
-  }, [formWeight, formRate]);
-
-  const handleCreateDebitNote = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newNote: PurchaseDebitNote = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `dn-${Date.now()}`,
-      debit_note_no: `DN-2026-0${debitNotes.length + 10}`,
-      orig_purchase_inv_no: formOrigBill,
-      supplier_name: formSupplier,
-      item_tag_code: formItemTag,
-      weight_returned_g: calculatedReturn.wt,
-      return_reason: formReason,
-      return_rate_per_g: calculatedReturn.rate,
-      rate_type: formRateType,
-      tax_reversal_amount: calculatedReturn.gstReversal,
-      debit_amount: calculatedReturn.totalDebit,
-      status: 'PENDING_CONFIRMATION',
-      created_at: '2026-10-31',
-    };
-
-    setDebitNotes([newNote, ...debitNotes]);
-    setIsNewReturnOpen(false);
+  const fetchDebitNotes = async () => {
+    try {
+      setLoading(true);
+      const snapshot = await getDocs(collection(db, 'purchases_debit_notes'));
+      const list: PurchaseDebitNote[] = [];
+      snapshot.forEach((d) => {
+        list.push({ id: d.id, ...(d.data() as Omit<PurchaseDebitNote, 'id'>) });
+      });
+      list.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+      setDebitNotes(list);
+    } catch (err: any) {
+      console.error('Error fetching debit notes:', err);
+      showToast('error', err.message || 'Failed to load debit notes');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const filteredDebitNotes = debitNotes.filter((item) => {
-    if (statusFilter !== 'All' && item.status !== statusFilter) return false;
-    if (reasonFilter !== 'All' && item.return_reason !== reasonFilter) return false;
-    if (searchQuery.trim() !== '') {
+  useEffect(() => {
+    fetchDebitNotes();
+  }, []);
+
+  const showToast = (type: 'success' | 'error', msg: string) => {
+    setToastType(type);
+    setToastMessage(msg);
+    setTimeout(() => setToastType('idle'), 4000);
+  };
+
+  const handleOpenAdd = () => {
+    setNoteNo('DN-' + Math.floor(1000 + Math.random() * 9000));
+    setOrigInv('PUR-' + Math.floor(1000 + Math.random() * 9000));
+    setSupplierName('');
+    setTagCode('TAG-G-' + Math.floor(1000 + Math.random() * 9000));
+    setWeightReturned('');
+    setRatePerGram('7850.00');
+    setIsAddModalOpen(true);
+  };
+
+  const handleAddDebitNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supplierName.trim() || !weightReturned || !ratePerGram) return;
+
+    try {
+      setSaving(true);
+      const wt = parseFloat(weightReturned) || 0;
+      const rate = parseFloat(ratePerGram) || 0;
+      const baseValue = wt * rate;
+      const taxReversal = baseValue * 0.03; // 3% GST reversal
+      const totalDebit = baseValue + taxReversal;
+      const today = new Date().toISOString().split('T')[0];
+
+      const newNote = {
+        debit_note_no: noteNo.trim() || 'DN-' + Math.floor(1000 + Math.random() * 9000),
+        orig_purchase_inv_no: origInv.trim() || 'PUR-0000',
+        supplier_name: supplierName.trim(),
+        item_tag_code: tagCode.trim() || 'TAG-G-0000',
+        weight_returned_g: wt,
+        return_reason: returnReason,
+        return_rate_per_g: rate,
+        rate_type: rateType,
+        tax_reversal_amount: taxReversal,
+        debit_amount: totalDebit,
+        status: 'PENDING_CONFIRMATION' as const,
+        created_at: today,
+      };
+
+      const docRef = await addDoc(collection(db, 'purchases_debit_notes'), newNote);
+      setDebitNotes((prev) => [{ id: docRef.id, ...newNote }, ...prev]);
+      setIsAddModalOpen(false);
+      showToast('success', `Debit note ${newNote.debit_note_no} created.`);
+    } catch (err: any) {
+      console.error('Error adding debit note:', err);
+      showToast('error', err.message || 'Failed to create debit note');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggleStatus = async (id: string, current: PurchaseDebitNote['status']) => {
+    const nextStatus: PurchaseDebitNote['status'] =
+      current === 'PENDING_CONFIRMATION'
+        ? 'ACCEPTED_BY_VENDOR'
+        : current === 'ACCEPTED_BY_VENDOR'
+        ? 'CREDITED_TO_ACCOUNT'
+        : 'PENDING_CONFIRMATION';
+
+    try {
+      await updateDoc(doc(db, 'purchases_debit_notes', id), { status: nextStatus });
+      setDebitNotes((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, status: nextStatus } : n))
+      );
+      showToast('success', `Debit note status changed to ${nextStatus.replace(/_/g, ' ')}.`);
+    } catch (err: any) {
+      console.error('Error updating status:', err);
+    }
+  };
+
+  const handleDeleteNote = async (id: string, noteNumber: string) => {
+    if (!confirm(`Delete debit note ${noteNumber}?`)) return;
+    try {
+      await deleteDoc(doc(db, 'purchases_debit_notes', id));
+      setDebitNotes((prev) => prev.filter((n) => n.id !== id));
+      showToast('success', `Debit note ${noteNumber} deleted.`);
+    } catch (err: any) {
+      console.error('Error deleting debit note:', err);
+    }
+  };
+
+  const filteredNotes = debitNotes.filter((n) => {
+    if (filterStatus !== 'All' && n.status !== filterStatus) return false;
+    if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      const matchNote = item.debit_note_no.toLowerCase().includes(q);
-      const matchSupplier = item.supplier_name.toLowerCase().includes(q);
-      const matchBill = item.orig_purchase_inv_no.toLowerCase().includes(q);
-      if (!matchNote && !matchSupplier && !matchBill) return false;
+      const matchNote = n.debit_note_no?.toLowerCase().includes(q);
+      const matchSupp = n.supplier_name?.toLowerCase().includes(q);
+      const matchTag = n.item_tag_code?.toLowerCase().includes(q);
+      if (!matchNote && !matchSupp && !matchTag) return false;
     }
     return true;
   });
 
+  const totalReturnedWeight = debitNotes.reduce((acc, curr) => acc + (curr.weight_returned_g || 0), 0);
+  const totalDebitAmount = debitNotes.reduce((acc, curr) => acc + (curr.debit_amount || 0), 0);
+  const pendingCount = debitNotes.filter((n) => n.status === 'PENDING_CONFIRMATION').length;
+  const acceptedCount = debitNotes.filter((n) => n.status === 'ACCEPTED_BY_VENDOR' || n.status === 'CREDITED_TO_ACCOUNT').length;
+
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0">
-      <TabBar title="purchase_debit_notes" />
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white w-full min-w-0 font-sans">
+      <TabBar title="purchases_returns" />
       <ActionToolbar
-        filterPlaceholder="Filter debit notes by DN #, supplier, or original bill..."
+        filterPlaceholder="Filter debit notes by vendor, invoice, tag..."
         insertLabel="New Debit Note"
-        onInsertClick={() => setIsNewReturnOpen(true)}
+        onInsertClick={handleOpenAdd}
+        onRefresh={fetchDebitNotes}
       />
 
       <div className="flex-1 overflow-y-auto bg-[#fafafa] flex flex-col custom-scrollbar w-full">
-        {/* KPI Metrics Cards */}
-        <div className="p-4 sm:p-5 border-b border-[#e5e7eb] bg-white">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Debit Notes Issued</span>
-                <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
-              </div>
-              <div className="text-xl font-medium text-neutral-900">{debitNotes.length} Notes</div>
-              <div className="text-[11px] text-neutral-500 mt-1 font-mono">
-                Month of October 2026
-              </div>
+        <div className="p-4 flex flex-col gap-4 max-w-7xl w-full mx-auto">
+          {/* Toast Notification */}
+          {toastType === 'success' && (
+            <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{toastMessage}</span>
             </div>
-
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
-              <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Total Value Returned</span>
-                <CreditCard className="w-3.5 h-3.5 text-blue-600" />
-              </div>
-              <div className="text-xl font-medium text-neutral-900">₹ 9,45,200</div>
-              <div className="text-[11px] text-blue-600 mt-1 font-mono">
-                Tax reversed @ 3% GST
-              </div>
+          )}
+          {toastType === 'error' && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs font-medium animate-fadeIn">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              <span>{toastMessage}</span>
             </div>
+          )}
 
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-amber-300 transition-colors shadow-2xs">
+          {/* Metric Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
               <div className="flex items-center justify-between text-neutral-500 mb-1">
                 <span className="text-[11px] font-medium uppercase tracking-wider">Weight Returned</span>
-                <Scale className="w-3.5 h-3.5 text-amber-500" />
+                <Scale className="w-4 h-4 text-amber-500" />
               </div>
-              <div className="text-xl font-medium text-amber-700">118.420 g</div>
-              <div className="text-[11px] text-neutral-500 mt-1 font-mono">
-                Reversed from stock register
+              <div className="text-xl font-medium text-amber-700">
+                {totalReturnedWeight.toFixed(3)} <span className="text-xs text-neutral-500 font-normal">g</span>
               </div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">Defective / rejected metal</div>
             </div>
 
-            <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] hover:border-emerald-300 transition-colors shadow-2xs">
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
               <div className="flex items-center justify-between text-neutral-500 mb-1">
-                <span className="text-[11px] font-medium uppercase tracking-wider">Pending Vendor Credit</span>
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                <span className="text-[11px] font-medium uppercase tracking-wider">Total Debit Value</span>
+                <CreditCard className="w-4 h-4 text-emerald-600" />
               </div>
-              <div className="text-xl font-medium text-amber-700">₹ 3,12,000</div>
-              <div className="text-[11px] text-neutral-500 mt-1 font-mono">
-                2 Notes awaiting signoff
+              <div className="text-xl font-medium text-neutral-800">
+                ₹{totalDebitAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
               </div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">Credited / recoverable</div>
+            </div>
+
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Vendor Accepted</span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-xl font-medium text-neutral-800">{acceptedCount} Notes</div>
+              <div className="text-[10px] text-emerald-600 font-medium mt-0.5">Adjusted in ledger</div>
+            </div>
+
+            <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs">
+              <div className="flex items-center justify-between text-neutral-500 mb-1">
+                <span className="text-[11px] font-medium uppercase tracking-wider">Pending Acceptance</span>
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+              </div>
+              <div className="text-xl font-medium text-neutral-800">{pendingCount} Notes</div>
+              <div className="text-[10px] text-amber-600 font-medium mt-0.5">Vendor confirmation due</div>
             </div>
           </div>
 
-          {/* Filter Bar */}
-          <div className="mt-4 pt-4 border-t border-[#f1f5f9] flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-neutral-400 font-mono text-[11px]">Filters:</span>
-
-              <div className="flex items-center gap-1 bg-white border border-[#e2e8f0] rounded-md px-2 py-1">
-                <span className="text-[11px] text-neutral-500">Reason:</span>
-                <select
-                  value={reasonFilter}
-                  onChange={(e) => setReasonFilter(e.target.value)}
-                  className="bg-transparent text-xs text-neutral-800 focus:outline-none cursor-pointer"
-                >
-                  <option value="All">All Defect Reasons</option>
-                  {REASON_OPTIONS.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
+          {/* Action & Filter Bar */}
+          <div className="p-3 bg-white rounded-lg border border-[#e2e8f0] shadow-2xs flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search debit note, supplier, tag..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 pr-3 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-[#f8fafc] focus:bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-medium placeholder:text-neutral-400 w-48 sm:w-60"
+                />
               </div>
 
-              <div className="flex items-center gap-1 bg-white border border-[#e2e8f0] rounded-md px-2 py-1">
-                <span className="text-[11px] text-neutral-500">Status:</span>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as any)}
-                  className="bg-transparent text-xs text-neutral-800 focus:outline-none cursor-pointer"
-                >
-                  <option value="All">All Statuses</option>
-                  <option value="ACCEPTED_BY_VENDOR">Accepted by Vendor</option>
-                  <option value="PENDING_CONFIRMATION">Pending Confirmation</option>
-                  <option value="CREDITED_TO_ACCOUNT">Credited to Account</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                placeholder="Search DN # or Supplier..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-56 px-2.5 py-1 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none placeholder:text-neutral-400"
-              />
-              <button
-                onClick={() => setIsNewReturnOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-2xs cursor-pointer"
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="px-2.5 py-1.5 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-700 font-medium cursor-pointer"
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Issue Debit Note</span>
-              </button>
+                <option value="All">All Statuses</option>
+                <option value="PENDING_CONFIRMATION">Pending Confirmation</option>
+                <option value="ACCEPTED_BY_VENDOR">Accepted by Vendor</option>
+                <option value="CREDITED_TO_ACCOUNT">Credited to Account</option>
+              </select>
             </div>
+
+            <button
+              onClick={handleOpenAdd}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#24b47e] hover:bg-[#1fa070] text-white shadow-2xs transition-colors cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>New Debit Note</span>
+            </button>
           </div>
-        </div>
 
-        {/* Supabase-style Table / Schema Definition Section */}
-        <div className="p-4 sm:p-5 flex-1 flex flex-col">
-          <div className="bg-white border border-[#e5e7eb] rounded-lg shadow-2xs overflow-hidden flex flex-col flex-1">
-            {/* Table Header Info Bar */}
-            <div className="px-4 py-2.5 border-b border-[#e5e7eb] bg-[#f8fafc] flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <RotateCcw className="w-4 h-4 text-emerald-600" />
-                <span className="font-mono font-medium text-neutral-800">
-                  public.purchase_debit_notes
-                </span>
-                <span className="text-neutral-400">•</span>
-                <span className="text-neutral-500">
-                  Showing {filteredDebitNotes.length} of {debitNotes.length} debit notes
-                </span>
+          {/* Table Container */}
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-2xs overflow-hidden">
+            {loading ? (
+              <div className="p-12 flex flex-col items-center justify-center gap-2 text-neutral-500">
+                <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+                <span className="text-xs font-medium">Loading debit notes from Firebase...</span>
               </div>
-
-              {/* Data / Definition toggle buttons */}
-              <div className="flex items-center bg-neutral-200/60 p-0.5 rounded border border-neutral-300/60 text-[13px]">
-                <button
-                  onClick={() => setActiveTab('data')}
-                  className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
-                    activeTab === 'data'
-                      ? 'bg-white text-neutral-900 shadow-2xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  Data
-                </button>
-                <button
-                  onClick={() => setActiveTab('definition')}
-                  className={`px-2.5 py-0.5 rounded font-medium transition-all cursor-pointer ${
-                    activeTab === 'definition'
-                      ? 'bg-white text-neutral-900 shadow-2xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  Definition
-                </button>
+            ) : filteredNotes.length === 0 ? (
+              <div className="p-12 text-center">
+                <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center mx-auto mb-3 text-emerald-600">
+                  <RotateCcw className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-medium text-neutral-800">No Purchase Debit Notes</h3>
+                <p className="text-xs text-neutral-500 mt-1 max-w-sm mx-auto">
+                  {debitNotes.length === 0
+                    ? 'No supplier returns recorded in Firebase yet. Click "New Debit Note" to log rejected casting lots, hallmark assay failures, or weight shortfalls.'
+                    : 'No debit notes match your active filters.'}
+                </p>
+                {debitNotes.length === 0 && (
+                  <button
+                    onClick={handleOpenAdd}
+                    className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#24b47e] text-white hover:bg-[#1fa070] transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Issue First Debit Note
+                  </button>
+                )}
               </div>
-            </div>
-
-            {/* Table Content: Data Tab */}
-            {activeTab === 'data' && (
-              <div className="flex-1 overflow-x-auto custom-scrollbar w-full">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-[#fcfcfc] border-b border-[#e5e7eb] text-neutral-600 font-mono text-[12px]">
-                      <th className="w-10 px-3 py-2 border-r border-[#e5e7eb] text-center">
-                        <input
-                          type="checkbox"
-                          className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                        />
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">debit_note_no</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">varchar</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">orig_bill_no</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">supplier</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <span className="text-neutral-800">weight_returned</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">grams</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-neutral-800">return_reason</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <span className="text-neutral-800">debit_amount</span>
-                          <span className="text-neutral-400 font-normal text-[10px]">inr</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 border-r border-[#e5e7eb] font-medium whitespace-nowrap text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <span className="text-neutral-800">status</span>
-                        </div>
-                      </th>
-                      <th className="px-3.5 py-2 font-medium whitespace-nowrap text-center">
-                        <span className="text-neutral-800">action</span>
-                      </th>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-[#f8fafc] text-neutral-600 font-medium border-b border-[#e2e8f0]">
+                    <tr>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Debit Note #</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Orig Invoice</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Supplier Name</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Item Tag</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] text-right">Returned Wt</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Rejection Reason</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] text-right">Debit Rate</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] text-right">Debit Amount</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px]">Status</th>
+                      <th className="py-2.5 px-3 uppercase tracking-wider text-[10px] text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#f1f5f9]">
-                    {filteredDebitNotes.map((row) => (
-                      <tr key={row.id} className="hover:bg-neutral-50/70 transition-colors">
-                        <td className="px-3 py-2 text-center border-r border-[#e5e7eb]">
-                          <input
-                            type="checkbox"
-                            className="rounded border-neutral-300 text-emerald-600 focus:ring-0"
-                          />
+                  <tbody className="divide-y divide-[#e2e8f0]">
+                    {filteredNotes.map((n) => (
+                      <tr key={n.id} className="hover:bg-[#f8fafc] transition-colors">
+                        <td className="py-2.5 px-3 font-mono font-medium text-neutral-800">{n.debit_note_no}</td>
+
+                        <td className="py-2.5 px-3 font-mono text-neutral-600">{n.orig_purchase_inv_no}</td>
+
+                        <td className="py-2.5 px-3 font-medium text-neutral-800">{n.supplier_name}</td>
+
+                        <td className="py-2.5 px-3 font-mono text-neutral-600">{n.item_tag_code}</td>
+
+                        <td className="py-2.5 px-3 text-right font-mono font-medium text-amber-700">
+                          {Number(n.weight_returned_g).toFixed(3)}g
                         </td>
-                        <td className="px-3.5 py-2 font-mono border-r border-[#e5e7eb] whitespace-nowrap">
-                          <span className="font-medium text-emerald-700">{row.debit_note_no}</span>
-                          <span className="text-[10px] text-neutral-400 block">{row.created_at}</span>
+
+                        <td className="py-2.5 px-3 text-neutral-700">{n.return_reason}</td>
+
+                        <td className="py-2.5 px-3 text-right font-mono text-neutral-700">
+                          ₹{Number(n.return_rate_per_g).toLocaleString('en-IN')}
                         </td>
-                        <td className="px-3.5 py-2 font-mono text-neutral-600 border-r border-[#e5e7eb] whitespace-nowrap">
-                          {row.orig_purchase_inv_no}
-                          <span className="text-[10px] text-neutral-400 block">{row.item_tag_code}</span>
+
+                        <td className="py-2.5 px-3 text-right font-mono font-medium text-neutral-900">
+                          ₹{Number(n.debit_amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                         </td>
-                        <td className="px-3.5 py-2 font-medium text-neutral-800 border-r border-[#e5e7eb] whitespace-nowrap">
-                          {row.supplier_name}
-                        </td>
-                        <td className="px-3.5 py-2 font-mono text-amber-700 border-r border-[#e5e7eb] text-right whitespace-nowrap bg-amber-50/20 font-medium">
-                          {row.weight_returned_g.toFixed(3)} g
-                        </td>
-                        <td className="px-3.5 py-2 border-r border-[#e5e7eb] whitespace-nowrap">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-[#f8fafc] text-neutral-700 border border-[#e2e8f0]">
-                            <ShieldAlert className="w-3 h-3 text-amber-600" />
-                            {row.return_reason}
-                          </span>
-                        </td>
-                        <td className="px-3.5 py-2 font-mono font-medium text-neutral-900 border-r border-[#e5e7eb] text-right whitespace-nowrap">
-                          ₹ {row.debit_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="px-3.5 py-2 text-center border-r border-[#e5e7eb] whitespace-nowrap">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-medium uppercase font-mono ${
-                              row.status === 'ACCEPTED_BY_VENDOR'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : row.status === 'CREDITED_TO_ACCOUNT'
-                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                : 'bg-amber-50 text-amber-700 border border-amber-200'
-                            }`}
-                          >
-                            {row.status.replace(/_/g, ' ')}
-                          </span>
-                        </td>
-                        <td className="px-3.5 py-2 text-center whitespace-nowrap">
+
+                        <td className="py-2.5 px-3">
                           <button
-                            onClick={() => setSelectedNoteForDetail(row)}
-                            className="p-1 hover:bg-neutral-100 rounded text-neutral-600 hover:text-emerald-700 transition-colors cursor-pointer"
-                            title="View Debit Note Detail"
+                            onClick={() => handleToggleStatus(n.id, n.status)}
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors cursor-pointer ${
+                              n.status === 'ACCEPTED_BY_VENDOR'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : n.status === 'CREDITED_TO_ACCOUNT'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : 'bg-amber-50 text-amber-700 border-amber-200'
+                            }`}
+                            title="Click to advance status"
                           >
-                            <Eye className="w-3.5 h-3.5" />
+                            {n.status.replace(/_/g, ' ')}
+                          </button>
+                        </td>
+
+                        <td className="py-2.5 px-3 text-right">
+                          <button
+                            onClick={() => handleDeleteNote(n.id, n.debit_note_no)}
+                            className="p-1 rounded text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            title="Delete note"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </td>
                       </tr>
@@ -479,298 +399,145 @@ export function PurchasesReturnsView() {
                 </table>
               </div>
             )}
-
-            {/* Table Content: Definition Tab */}
-            {activeTab === 'definition' && (
-              <div className="p-4 overflow-x-auto font-mono text-xs text-neutral-800 bg-[#fbfbfb] w-full">
-                <div className="bg-neutral-900 text-neutral-100 p-4 rounded-md overflow-x-auto shadow-inner text-[12px] leading-relaxed w-full">
-                  <span className="text-emerald-400">CREATE TABLE</span> public.purchase_debit_notes (
-                  <br />
-                  <span className="pl-6 text-blue-300">id</span>{' '}
-                  <span className="text-amber-300">uuid</span>{' '}
-                  <span className="text-neutral-400">DEFAULT gen_random_uuid() PRIMARY KEY,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">debit_note_no</span>{' '}
-                  <span className="text-amber-300">varchar(64)</span>{' '}
-                  <span className="text-neutral-400">UNIQUE NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">orig_purchase_inv_no</span>{' '}
-                  <span className="text-amber-300">varchar(64)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">supplier_name</span>{' '}
-                  <span className="text-amber-300">varchar(255)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">item_tag_code</span>{' '}
-                  <span className="text-amber-300">varchar(64),</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">weight_returned_g</span>{' '}
-                  <span className="text-amber-300">numeric(10,3)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL CHECK (weight_returned_g &gt; 0),</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">return_reason</span>{' '}
-                  <span className="text-amber-300">varchar(64)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">return_rate_per_g</span>{' '}
-                  <span className="text-amber-300">numeric(10,2)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">debit_amount</span>{' '}
-                  <span className="text-amber-300">numeric(12,2)</span>{' '}
-                  <span className="text-neutral-400">NOT NULL,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">status</span>{' '}
-                  <span className="text-amber-300">varchar(32)</span>{' '}
-                  <span className="text-neutral-400">DEFAULT &apos;PENDING_CONFIRMATION&apos;,</span>
-                  <br />
-                  <span className="pl-6 text-blue-300">created_at</span>{' '}
-                  <span className="text-amber-300">timestamptz</span>{' '}
-                  <span className="text-neutral-400">DEFAULT now()</span>
-                  <br />
-                  );
-                  <br />
-                  <br />
-                  <span className="text-emerald-400">ALTER TABLE</span> public.purchase_debit_notes{' '}
-                  <span className="text-emerald-400">ENABLE ROW LEVEL SECURITY;</span>
-                </div>
-              </div>
-            )}
-
-            {/* Table Footer Bar */}
-            <div className="h-[36px] bg-[#f8fafc] border-t border-[#e5e7eb] px-3.5 flex items-center justify-between text-[12px] text-neutral-500 font-mono select-none w-full">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1">
-                  <span>Showing</span>
-                  <span className="px-1.5 py-0.5 bg-white border border-[#e2e8f0] rounded text-neutral-800 font-medium">
-                    {filteredDebitNotes.length}
-                  </span>
-                  <span>records</span>
-                </div>
-                <span>•</span>
-                <span>Active Filter: {reasonFilter} / {statusFilter}</span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-emerald-600 font-medium flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5" /> Stock Reversal Synchronized
-                </span>
-              </div>
-            </div>
           </div>
         </div>
       </div>
 
-      {/* New Return / Debit Note Drawer Modal */}
-      {isNewReturnOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-lg shadow-xl border border-[#e2e8f0] max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-4 py-3 border-b border-[#e5e7eb] flex items-center justify-between bg-[#f8fafc]">
+      {/* Add Debit Note Modal */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-lg border border-[#e2e8f0] shadow-xl w-full max-w-md overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-[#e2e8f0]">
               <div className="flex items-center gap-2">
                 <RotateCcw className="w-4 h-4 text-emerald-600" />
-                <h3 className="text-sm font-medium text-neutral-900">Issue Purchase Debit Note</h3>
-                <span className="text-[10px] font-mono px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded">
-                  Stock Deduction
-                </span>
+                <h2 className="text-sm font-medium text-neutral-800">Issue Purchase Debit Note</h2>
               </div>
               <button
-                onClick={() => setIsNewReturnOpen(false)}
-                className="p-1 hover:bg-neutral-200 rounded text-neutral-400 hover:text-neutral-700 transition-colors cursor-pointer"
+                onClick={() => setIsAddModalOpen(false)}
+                className="text-neutral-400 hover:text-neutral-700"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateDebitNote} className="p-4 overflow-y-auto space-y-4 flex-1 custom-scrollbar">
+            <form onSubmit={handleAddDebitNote} className="p-4 space-y-3 text-xs">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Original Purchase Bill # *</label>
+                  <label className="block text-neutral-700 font-medium mb-1">Debit Note # *</label>
                   <input
                     type="text"
                     required
-                    value={formOrigBill}
-                    onChange={(e) => setFormOrigBill(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
-                    placeholder="PUR-26-042"
+                    value={noteNo}
+                    onChange={(e) => setNoteNo(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Supplier Name *</label>
+                  <label className="block text-neutral-700 font-medium mb-1">Original Invoice #</label>
                   <input
                     type="text"
                     required
-                    value={formSupplier}
-                    onChange={(e) => setFormSupplier(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
+                    value={origInv}
+                    onChange={(e) => setOrigInv(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
               </div>
 
+              <div>
+                <label className="block text-neutral-700 font-medium mb-1">Supplier Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Apex Jewellery Works"
+                  value={supplierName}
+                  onChange={(e) => setSupplierName(e.target.value)}
+                  className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-800 focus:border-emerald-500 focus:outline-none font-medium"
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Item Tag Code / Barcode</label>
+                  <label className="block text-neutral-700 font-medium mb-1">Item Barcode / Tag</label>
                   <input
                     type="text"
-                    value={formItemTag}
-                    onChange={(e) => setFormItemTag(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
-                    placeholder="TAG-G-9021"
+                    value={tagCode}
+                    onChange={(e) => setTagCode(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-neutral-700 mb-1 block">Reason for Rejection *</label>
+                  <label className="block text-neutral-700 font-medium mb-1">Returned Wt (g) *</label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    required
+                    placeholder="0.000"
+                    value={weightReturned}
+                    onChange={(e) => setWeightReturned(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none font-medium"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-neutral-700 font-medium mb-1">Rejection / Return Reason</label>
+                <select
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value as any)}
+                  className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-700 focus:border-emerald-500 focus:outline-none font-medium"
+                >
+                  <option value="Porosity / Casting Defect">Porosity / Casting Defect</option>
+                  <option value="Hallmark Purity Failure">Hallmark Purity Failure</option>
+                  <option value="Weight Shortfall">Weight Shortfall vs Invoice</option>
+                  <option value="Solder Excess">Excessive Low-Karat Solder</option>
+                  <option value="Stone Detachment">Loose Stone / Detachment</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">Rate Fixed (₹/g) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={ratePerGram}
+                    onChange={(e) => setRatePerGram(e.target.value)}
+                    className="w-full px-3 py-1.5 border border-[#e2e8f0] rounded-md font-mono text-neutral-800 focus:border-emerald-500 focus:outline-none font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block text-neutral-700 font-medium mb-1">Rate Type</label>
                   <select
-                    value={formReason}
-                    onChange={(e) => setFormReason(e.target.value as any)}
-                    className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
+                    value={rateType}
+                    onChange={(e) => setRateType(e.target.value as any)}
+                    className="w-full px-2.5 py-1.5 border border-[#e2e8f0] rounded-md text-neutral-700 focus:border-emerald-500 focus:outline-none font-medium"
                   >
-                    {REASON_OPTIONS.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
+                    <option value="ORIGINAL_RATE">Original Invoice Rate</option>
+                    <option value="MARKET_RATE">Today Market Rate</option>
                   </select>
                 </div>
               </div>
 
-              <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0]">
-                <div className="text-xs font-medium text-neutral-700 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                  <Scale className="w-3.5 h-3.5 text-emerald-600" />
-                  Weight and Return Pricing
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-xs font-medium text-neutral-700 mb-1 block">Weight Returned (g) *</label>
-                    <input
-                      type="number"
-                      step="0.001"
-                      required
-                      value={formWeight}
-                      onChange={(e) => setFormWeight(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-medium text-neutral-700 mb-1 block">Rate Valuation Type</label>
-                    <select
-                      value={formRateType}
-                      onChange={(e) => setFormRateType(e.target.value as any)}
-                      className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800"
-                    >
-                      <option value="ORIGINAL_RATE">Original Inward Bill Rate</option>
-                      <option value="MARKET_RATE">Current Market Rate</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-medium text-neutral-700 mb-1 block">Return Rate (₹/g) *</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      required
-                      value={formRate}
-                      onChange={(e) => setFormRate(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-[#e2e8f0] rounded-md bg-white focus:border-emerald-500 focus:outline-none text-neutral-800 font-mono"
-                    />
-                  </div>
-                </div>
-
-                <div className="mt-3 p-3 bg-white border border-[#e2e8f0] rounded-md grid grid-cols-3 gap-2 text-xs font-mono">
-                  <div>
-                    <span className="text-neutral-400 block text-[10px]">Net Metal Value:</span>
-                    <span className="text-neutral-800 font-medium">₹ {calculatedReturn.baseValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                  </div>
-                  <div>
-                    <span className="text-neutral-400 block text-[10px]">Tax Reversal (3% GST):</span>
-                    <span className="text-neutral-800 font-medium">₹ {calculatedReturn.gstReversal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                  </div>
-                  <div>
-                    <span className="text-neutral-400 block text-[10px]">Total Debit Amount:</span>
-                    <span className="text-emerald-700 font-medium">₹ {calculatedReturn.totalDebit.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#e5e7eb]">
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#e2e8f0]">
                 <button
                   type="button"
-                  onClick={() => setIsNewReturnOpen(false)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50 transition-colors cursor-pointer"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="px-3 py-1.5 border border-[#e2e8f0] text-neutral-600 rounded-md font-medium hover:bg-neutral-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-2xs cursor-pointer"
+                  disabled={saving}
+                  className="px-4 py-1.5 bg-[#24b47e] hover:bg-[#1fa070] text-white rounded-md font-medium shadow-2xs flex items-center gap-1.5 disabled:opacity-50"
                 >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Generate Debit Note</span>
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  <span>{saving ? 'Saving...' : 'Issue Debit Note'}</span>
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* Detail Modal */}
-      {selectedNoteForDetail && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-lg shadow-xl border border-[#e2e8f0] max-w-md w-full flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-4 py-3 border-b border-[#e5e7eb] flex items-center justify-between bg-[#f8fafc]">
-              <div className="flex items-center gap-2">
-                <RotateCcw className="w-4 h-4 text-emerald-600" />
-                <h3 className="text-sm font-medium text-neutral-900">
-                  Debit Note {selectedNoteForDetail.debit_note_no}
-                </h3>
-              </div>
-              <button
-                onClick={() => setSelectedNoteForDetail(null)}
-                className="p-1 hover:bg-neutral-200 rounded text-neutral-400 hover:text-neutral-700 transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-4 space-y-2.5 text-xs">
-              <div className="flex justify-between py-1 border-b border-[#f1f5f9]">
-                <span className="text-neutral-500">Supplier:</span>
-                <span className="font-medium text-neutral-800">{selectedNoteForDetail.supplier_name}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-[#f1f5f9]">
-                <span className="text-neutral-500">Orig Purchase Bill:</span>
-                <span className="font-mono text-neutral-800">{selectedNoteForDetail.orig_purchase_inv_no}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-[#f1f5f9]">
-                <span className="text-neutral-500">Tag / Barcode:</span>
-                <span className="font-mono text-neutral-800">{selectedNoteForDetail.item_tag_code}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-[#f1f5f9]">
-                <span className="text-neutral-500">Weight Returned:</span>
-                <span className="font-mono font-medium text-amber-700">{selectedNoteForDetail.weight_returned_g.toFixed(3)} g</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-[#f1f5f9]">
-                <span className="text-neutral-500">Reason:</span>
-                <span className="text-neutral-800">{selectedNoteForDetail.return_reason}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-[#f1f5f9]">
-                <span className="text-neutral-500">Return Rate:</span>
-                <span className="font-mono text-neutral-800">₹ {selectedNoteForDetail.return_rate_per_g.toFixed(2)}/g ({selectedNoteForDetail.rate_type})</span>
-              </div>
-              <div className="flex justify-between py-1.5 border-b border-[#f1f5f9] bg-emerald-50/50 p-2 rounded">
-                <span className="font-medium text-neutral-700">Total Debit Credited:</span>
-                <span className="font-mono font-medium text-emerald-700">₹ {selectedNoteForDetail.debit_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-              </div>
-            </div>
-            <div className="px-4 py-3 bg-[#f8fafc] border-t border-[#e5e7eb] flex justify-end">
-              <button
-                onClick={() => setSelectedNoteForDetail(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-neutral-900 text-white hover:bg-neutral-800 transition-colors shadow-2xs cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
           </div>
         </div>
       )}
